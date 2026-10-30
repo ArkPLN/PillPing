@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- 对应 legacy/res/drawable/ic_form_capsule.xml：
+       两段胶囊半壳 + 中间留缝，整体绕中心旋转 -45°。 -->
+  <g transform="rotate(-45 12 12)">
+    <path fill="currentColor" d="M8,8 H11.5 V16 H8 C5.8,16 4,14.2 4,12 C4,9.8 5.8,8 8,8 Z" />
+    <path fill="currentColor" d="M12.5,8 H16 C18.2,8 20,9.8 20,12 C20,14.2 18.2,16 16,16 H12.5 Z" />
+  </g>
+</svg>
