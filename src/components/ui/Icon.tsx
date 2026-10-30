@@ -1,7 +1,7 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React from 'react';
-import { View } from 'react-native';
+import { View, type ColorValue } from 'react-native';
 
 import CapsuleIcon from '@/assets/icons/capsule.svg';
 import { ICONS, type IconKey } from '@/lib/icons';
@@ -9,7 +9,11 @@ import { ICONS, type IconKey } from '@/lib/icons';
 type Props = {
   name: IconKey;
   size?: number;
-  color: string;
+  /**
+   * React Navigation 的 tabBarIcon 回传的是 ColorValue；
+   * 运行时实际都是字符串，这里统一收敛为 string 传给图标库。
+   */
+  color: ColorValue;
 };
 
 /**
@@ -18,14 +22,15 @@ type Props = {
  */
 export function Icon({ name, size = 22, color }: Props) {
   const spec = ICONS[name];
+  const c = color as string;
 
   if (spec.family === 'capsule') {
-    return <CapsuleIcon width={size} height={size} color={color} />;
+    return <CapsuleIcon width={size} height={size} color={c} />;
   }
   if (spec.family === 'mci') {
-    return <MaterialCommunityIcons name={spec.name} size={size} color={color} />;
+    return <MaterialCommunityIcons name={spec.name} size={size} color={c} />;
   }
-  return <MaterialIcons name={spec.name} size={size} color={color} />;
+  return <MaterialIcons name={spec.name} size={size} color={c} />;
 }
 
 /** 圆形/圆角容器里的图标（对应 legacy 的 avatar / iconWrap 组合）。 */
