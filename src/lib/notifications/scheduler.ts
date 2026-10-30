@@ -31,6 +31,7 @@ import {
   ensureCategories,
   ensureChannel,
 } from './channel';
+import { NOTIFICATIONS_SUPPORTED, safeNotify } from './platform';
 
 /** identifier 前缀，用于区分并批量取消。 */
 const ID_DOSE = 'dose-';
@@ -63,21 +64,25 @@ function followupId(medId: string): string {
 
 /** 取消所有本应用排定的通知（只取消带我们前缀的，避免误删）。 */
 export async function cancelAllScheduled(): Promise<void> {
-  const all = await Notifications.getAllScheduledNotificationsAsync();
-  await Promise.all(
-    all
-      .filter((r) => {
-        const id = r.identifier ?? '';
-        return (
-          id.startsWith(ID_DOSE) || id.startsWith(ID_SPECIAL) || id.startsWith(ID_FOLLOWUP)
-        );
-      })
-      .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
-  );
+  if (!NOTIFICATIONS_SUPPORTED) return;
+  await safeNotify('cancelAllScheduled', async () => {
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      all
+        .filter((r) => {
+          const id = r.identifier ?? '';
+          return (
+            id.startsWith(ID_DOSE) || id.startsWith(ID_SPECIAL) || id.startsWith(ID_FOLLOWUP)
+          );
+        })
+        .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
+    );
+  });
 }
 
 /** 只取消某个普通服药次数的通知。 */
 export async function cancelDose(index: number): Promise<void> {
+  if (!NOTIFICATIONS_SUPPORTED) return;
   try {
     await Notifications.cancelScheduledNotificationAsync(doseId(index));
   } catch {
@@ -86,6 +91,7 @@ export async function cancelDose(index: number): Promise<void> {
 }
 
 export async function cancelSpecial(id: string): Promise<void> {
+  if (!NOTIFICATIONS_SUPPORTED) return;
   try {
     await Notifications.cancelScheduledNotificationAsync(specialId(id));
   } catch {
@@ -94,12 +100,15 @@ export async function cancelSpecial(id: string): Promise<void> {
 }
 
 export async function cancelFollowup(): Promise<void> {
-  const all = await Notifications.getAllScheduledNotificationsAsync();
-  await Promise.all(
-    all
-      .filter((r) => (r.identifier ?? '').startsWith(ID_FOLLOWUP))
-      .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
-  );
+  if (!NOTIFICATIONS_SUPPORTED) return;
+  await safeNotify('cancelFollowup', async () => {
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      all
+        .filter((r) => (r.identifier ?? '').startsWith(ID_FOLLOWUP))
+        .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
+    );
+  });
 }
 
 /** 立即展示一条通知（用于"预览"与"测试"）。 */
@@ -110,42 +119,48 @@ export async function presentNow(opts: {
   data?: Record<string, unknown>;
   color?: string;
 }): Promise<void> {
+  if (!NOTIFICATIONS_SUPPORTED) return;
   await ensureChannel();
-  await Notifications.scheduleNotificationAsync({
-    identifier: undefined,
-    content: {
-      title: opts.title,
-      body: opts.body,
-      categoryIdentifier: opts.category,
-      data: opts.data,
-      color: opts.color,
-      sound: 'default',
-      priority: Notifications.AndroidNotificationPriority.MAX,
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-    },
-    // null = 立即展示
-    trigger: null,
-  });
+  await safeNotify('presentNow', () =>
+    Notifications.scheduleNotificationAsync({
+      identifier: undefined,
+      content: {
+        title: opts.title,
+        body: opts.body,
+        categoryIdentifier: opts.category,
+        data: opts.data,
+        color: opts.color,
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+      // null = 立即展示
+      trigger: null,
+    })
+  );
 }
 
 /** 排定一条延时通知（用于 10 秒后台测试）。 */
 export async function scheduleTestIn(seconds: number): Promise<void> {
+  if (!NOTIFICATIONS_SUPPORTED) return;
   await ensureChannel();
-  await Notifications.scheduleNotificationAsync({
-    identifier: 'background-test',
-    content: {
-      title: '后台测试提醒 · 成功',
-      body: '应用在后台也能收到这条提醒。',
-      sound: 'default',
-      priority: Notifications.AndroidNotificationPriority.MAX,
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds,
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-    },
-  });
+  await safeNotify('scheduleTestIn', () =>
+    Notifications.scheduleNotificationAsync({
+      identifier: 'background-test',
+      content: {
+        title: '后台测试提醒 · 成功',
+        body: '应用在后台也能收到这条提醒。',
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+    })
+  );
 }
 
 async function scheduleAt(
@@ -160,28 +175,32 @@ async function scheduleAt(
     data?: Record<string, unknown>;
   }
 ): Promise<boolean> {
+  if (!NOTIFICATIONS_SUPPORTED) return false;
   // 只接受未来的时间；已过期的不排（避免立即弹出历史提醒）
   if (when <= Date.now()) return false;
-  await Notifications.scheduleNotificationAsync({
-    identifier,
-    content: {
-      title: content.title,
-      body: content.body,
-      subtitle: content.subtitle,
-      categoryIdentifier: content.categoryIdentifier,
-      color: content.color,
-      data: content.data,
-      sound: 'default',
-      priority: Notifications.AndroidNotificationPriority.MAX,
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: new Date(when),
-      ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
-    },
+  const ok = await safeNotify('scheduleAt', async () => {
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: {
+        title: content.title,
+        body: content.body,
+        subtitle: content.subtitle,
+        categoryIdentifier: content.categoryIdentifier,
+        color: content.color,
+        data: content.data,
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: new Date(when),
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
+      },
+    });
+    return true;
   });
-  return true;
+  return ok === true;
 }
 
 /**

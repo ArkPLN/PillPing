@@ -16,6 +16,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { COLORS } from '@/lib/colors';
+import { NOTIFICATIONS_SUPPORTED, safeNotify } from './platform';
 
 export const CHANNEL_ID = 'med_reminders_v2';
 export const CHANNEL_NAME = '服药提醒';
@@ -37,37 +38,43 @@ export const ACTION_FOLLOWUP_TOMORROW = 'FOLLOWUP_TOMORROW';
 export async function ensureChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
-  await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-    name: CHANNEL_NAME,
-    description: CHANNEL_DESC,
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 450, 220, 450],
-    enableVibrate: true,
-    enableLights: true,
-    lightColor: COLORS.primary.light,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    showBadge: true,
-    sound: 'default',
-    bypassDnd: false,
-  });
+  await safeNotify('ensureChannel', () =>
+    Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: CHANNEL_NAME,
+      description: CHANNEL_DESC,
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 450, 220, 450],
+      enableVibrate: true,
+      enableLights: true,
+      lightColor: COLORS.primary.light,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      showBadge: true,
+      sound: 'default',
+      bypassDnd: false,
+    })
+  );
 }
 
 /** 注册通知操作按钮类目。 */
 export async function ensureCategories(): Promise<void> {
-  await Notifications.setNotificationCategoryAsync(CATEGORY_DOSE, [
-    { identifier: ACTION_MARK, buttonTitle: '已服用' },
-    { identifier: ACTION_SNOOZE, buttonTitle: '10 分钟后' },
-  ]);
+  if (!NOTIFICATIONS_SUPPORTED) return;
 
-  await Notifications.setNotificationCategoryAsync(CATEGORY_SPECIAL, [
-    { identifier: ACTION_MARK, buttonTitle: '已服用' },
-    { identifier: ACTION_SNOOZE, buttonTitle: '10 分钟后' },
-  ]);
+  await safeNotify('ensureCategories', async () => {
+    await Notifications.setNotificationCategoryAsync(CATEGORY_DOSE, [
+      { identifier: ACTION_MARK, buttonTitle: '已服用' },
+      { identifier: ACTION_SNOOZE, buttonTitle: '10 分钟后' },
+    ]);
 
-  await Notifications.setNotificationCategoryAsync(CATEGORY_FOLLOWUP, [
-    { identifier: ACTION_FOLLOWUP_DONE, buttonTitle: '已复诊' },
-    { identifier: ACTION_FOLLOWUP_TOMORROW, buttonTitle: '明天再提醒' },
-  ]);
+    await Notifications.setNotificationCategoryAsync(CATEGORY_SPECIAL, [
+      { identifier: ACTION_MARK, buttonTitle: '已服用' },
+      { identifier: ACTION_SNOOZE, buttonTitle: '10 分钟后' },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync(CATEGORY_FOLLOWUP, [
+      { identifier: ACTION_FOLLOWUP_DONE, buttonTitle: '已复诊' },
+      { identifier: ACTION_FOLLOWUP_TOMORROW, buttonTitle: '明天再提醒' },
+    ]);
+  });
 }
 
 /**
@@ -75,14 +82,20 @@ export async function ensureCategories(): Promise<void> {
  * legacy 从不弹全屏页，只发横幅/声音/振动 —— 这里保持同样克制。
  */
 export function configureForegroundHandler(): void {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
+  if (!NOTIFICATIONS_SUPPORTED) return;
+
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  } catch (err) {
+    if (__DEV__) console.warn('[notifications] setNotificationHandler failed:', err);
+  }
 }
 
 export async function initNotifications(): Promise<void> {

@@ -21,6 +21,7 @@ import type { Med } from '@/lib/types';
 import { METHODS } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
+import { goBack } from '@/lib/nav';
 
 /** 表单内部状态（从 Med 映射而来）。 */
 type Draft = {
@@ -194,7 +195,7 @@ export default function MedFormScreen() {
 
     (async () => {
       await syncAll(buildSchedulerInput());
-      router.back();
+      goBack();
     })();
   }, [draft, editing, isNew, meds.length, addMed, updateMed, router]);
 
@@ -203,7 +204,7 @@ export default function MedFormScreen() {
     removeMed(editing.id);
     setConfirmDelete(false);
     await syncAll(buildSchedulerInput());
-    router.back();
+    goBack();
   }, [editing, removeMed, router]);
 
   return (
@@ -217,7 +218,7 @@ export default function MedFormScreen() {
           title={isNew ? '添加药物' : '编辑药物'}
           subtitle={isNew ? '添加你每天要吃的药，提醒时会自动带上这些信息。' : '修改后，之后的提醒内容会同步更新。'}
           action={
-            <HeaderIconButton accessibilityLabel="返回" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="返回" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }
@@ -440,7 +441,7 @@ export default function MedFormScreen() {
             </Pressable>
           )}
           <View className="flex-1" />
-          <Pressable onPress={() => router.back()} className="px-3 py-3 active:opacity-70">
+          <Pressable onPress={() => goBack()} className="px-3 py-3 active:opacity-70">
             <TextMuted className="text-[14px]">取消</TextMuted>
           </Pressable>
           <Pressable

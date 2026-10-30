@@ -21,6 +21,7 @@ import type { SpecialMed } from '@/lib/types';
 import { METHODS, SPECIAL_MODE_DAILY, SPECIAL_MODE_INTERVAL, type SpecialMode } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
+import { goBack } from '@/lib/nav';
 
 type Draft = {
   name: string;
@@ -180,7 +181,7 @@ export default function SpecialFormScreen() {
 
     (async () => {
       await syncAll(buildSchedulerInput());
-      router.back();
+      goBack();
     })();
   }, [draft, editing, isNew, addSpecial, updateSpecial, router]);
 
@@ -189,7 +190,7 @@ export default function SpecialFormScreen() {
     removeSpecial(editing.id);
     setConfirmDelete(false);
     await syncAll(buildSchedulerInput());
-    router.back();
+    goBack();
   }, [editing, removeSpecial, router]);
 
   return (
@@ -203,7 +204,7 @@ export default function SpecialFormScreen() {
           title={isNew ? '添加特殊用药' : '编辑特殊用药'}
           subtitle="特殊用药有独立的提醒节奏，不计入普通药物的今日次数。"
           action={
-            <HeaderIconButton accessibilityLabel="返回" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="返回" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }
@@ -343,7 +344,7 @@ export default function SpecialFormScreen() {
             </Pressable>
           )}
           <View className="flex-1" />
-          <Pressable onPress={() => router.back()} className="px-3 py-3 active:opacity-70">
+          <Pressable onPress={() => goBack()} className="px-3 py-3 active:opacity-70">
             <TextMuted className="text-[14px]">取消</TextMuted>
           </Pressable>
           <Pressable

@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import {
@@ -33,6 +33,8 @@ function StartupBridge() {
       // 冷启动时若是由通知按钮点开，先处理数据变更
       await consumeInitialResponse();
       if (cancelled) return;
+      // Web 只是开发期预览，不自动弹引导页，避免每次刷新都被跳走
+      if (Platform.OS === 'web') return;
       if (!onboarded) {
         // 稍微延迟，等 Tabs 挂载完成
         setTimeout(() => {

@@ -16,6 +16,7 @@ import { buildSchedulerInput } from '@/lib/notifications/input';
 import { syncAll } from '@/lib/notifications/scheduler';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
+import { goBack } from '@/lib/nav';
 import { DOSE_PENDING, DOSE_SKIPPED, DOSE_TAKEN } from '@/lib/types';
 
 /**
@@ -54,7 +55,7 @@ export default function DoseScreen() {
     const run = async () => {
       markTaken(index);
       await syncAll(buildSchedulerInput());
-      router.back();
+      goBack();
     };
 
     if (plannedAt - Date.now() > 30 * 60_000) {
@@ -75,7 +76,7 @@ export default function DoseScreen() {
     if (!valid) return;
     snooze(index, 10);
     await syncAll(buildSchedulerInput());
-    router.back();
+    goBack();
   }, [valid, index, snooze, router]);
 
   const doSkip = useCallback(async () => {
@@ -83,14 +84,14 @@ export default function DoseScreen() {
     setConfirmSkip(false);
     skip(index);
     await syncAll(buildSchedulerInput());
-    router.back();
+    goBack();
   }, [valid, index, skip, router]);
 
   const doUndo = useCallback(async () => {
     if (!valid) return;
     undo(index);
     await syncAll(buildSchedulerInput());
-    router.back();
+    goBack();
   }, [valid, index, undo, router]);
 
   const goBackfill = useCallback(() => {
@@ -101,7 +102,7 @@ export default function DoseScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-bg dark:bg-bg-d">
         <TextMuted>记录不存在</TextMuted>
-        <Pressable onPress={() => router.back()} className="mt-4">
+        <Pressable onPress={() => goBack()} className="mt-4">
           <Text className="text-[14px] font-medium text-primary dark:text-primary-d">返回</Text>
         </Pressable>
       </View>
@@ -130,7 +131,7 @@ export default function DoseScreen() {
             cycle!.snoozeUntil[index] > 0 ? ` · 已推迟到 ${formatTime(due)}` : ''
           }`}
           action={
-            <HeaderIconButton accessibilityLabel="关闭" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="关闭" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }

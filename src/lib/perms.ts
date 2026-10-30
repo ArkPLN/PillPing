@@ -11,38 +11,57 @@ import { Linking, Platform } from 'react-native';
 
 import { COLORS } from '@/lib/colors';
 import { CHANNEL_ID, ensureChannel } from './notifications/channel';
+import { NOTIFICATIONS_SUPPORTED } from './notifications/platform';
 
 const PKG = 'com.expo.medtimer';
 
 /** 对应 legacy Perms.notificationsEnabled。 */
 export async function notificationsEnabled(): Promise<boolean> {
-  const settings = await Notifications.getPermissionsAsync();
-  return settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+  // Web 无通知权限概念，视作已开启以免 UI 一直显示告警
+  if (!NOTIFICATIONS_SUPPORTED) return true;
+  try {
+    const settings = await Notifications.getPermissionsAsync();
+    return (
+      settings.granted ||
+      settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+    );
+  } catch {
+    return true;
+  }
 }
 
 /** 请求通知权限；已拒绝且不再询问时回落为打开设置页。 */
 export async function requestNotifications(): Promise<boolean> {
-  const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
+  if (!NOTIFICATIONS_SUPPORTED) return false;
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    if (current.granted) return true;
 
-  if (!current.canAskAgain) {
-    await openNotificationSettings();
+    if (!current.canAskAgain) {
+      await openNotificationSettings();
+      return false;
+    }
+    const next = await Notifications.requestPermissionsAsync();
+    return next.granted;
+  } catch {
     return false;
   }
-  const next = await Notifications.requestPermissionsAsync();
-  return next.granted;
 }
 
 /** 对应 legacy Perms.channelHigh：渠道重要性是否仍为高。 */
 export async function channelHigh(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
-  await ensureChannel();
-  const ch = await Notifications.getNotificationChannelAsync(CHANNEL_ID);
-  if (!ch) return false;
-  return (
-    ch.importance === Notifications.AndroidImportance.HIGH ||
-    ch.importance === Notifications.AndroidImportance.MAX
-  );
+  try {
+    await ensureChannel();
+    const ch = await Notifications.getNotificationChannelAsync(CHANNEL_ID);
+    if (!ch) return false;
+    return (
+      ch.importance === Notifications.AndroidImportance.HIGH ||
+      ch.importance === Notifications.AndroidImportance.MAX
+    );
+  } catch {
+    return true;
+  }
 }
 
 /**

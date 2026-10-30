@@ -13,6 +13,7 @@ import { buildSchedulerInput } from '@/lib/notifications/input';
 import { syncAll } from '@/lib/notifications/scheduler';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
+import { goBack } from '@/lib/nav';
 
 type Mode = 'first' | 'backfill' | 'special-backfill';
 
@@ -93,7 +94,7 @@ export default function TimePickerScreen() {
 
     if (mode === 'backfill') {
       if (!cycle || index < 0 || index >= cycle.count) {
-        router.back();
+        goBack();
         return;
       }
       // 不能早于上一次服药时间
@@ -110,13 +111,13 @@ export default function TimePickerScreen() {
       }
       markTakenAt(index, at);
       await syncAll(buildSchedulerInput());
-      router.back();
+      goBack();
       return;
     }
 
     if (mode === 'special-backfill') {
       if (!special) {
-        router.back();
+        goBack();
         return;
       }
       if (special.lastAt > 0 && at < special.lastAt) {
@@ -125,13 +126,13 @@ export default function TimePickerScreen() {
       }
       markSpecialTaken(special.id, at);
       await syncAll(buildSchedulerInput());
-      router.back();
+      goBack();
       return;
     }
 
     // 'first' 模式：写回共享状态，由今日页读取
     useFirstAt.getState().set(at);
-    router.back();
+    goBack();
   }, [picked, mode, cycle, index, special, markTakenAt, markSpecialTaken, router]);
 
   return (
@@ -145,7 +146,7 @@ export default function TimePickerScreen() {
           title={meta.title}
           subtitle={meta.intro}
           action={
-            <HeaderIconButton accessibilityLabel="关闭" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="关闭" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }
@@ -167,7 +168,7 @@ export default function TimePickerScreen() {
 
         <View className="mt-5 flex-row items-center gap-2">
           <View className="flex-1" />
-          <Pressable onPress={() => router.back()} className="px-3 py-3 active:opacity-70">
+          <Pressable onPress={() => goBack()} className="px-3 py-3 active:opacity-70">
             <TextMuted className="text-[14px]">取消</TextMuted>
           </Pressable>
           <Pressable

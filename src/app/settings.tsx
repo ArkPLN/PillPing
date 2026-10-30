@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { ConfirmDialog } from '@/components/forms/Dialogs';
 import { HeaderIconButton, PageHeader } from '@/components/home/Header';
@@ -258,7 +259,7 @@ export default function SettingsScreen() {
           title="设置"
           subtitle="提醒开关、节奏、外观与数据"
           action={
-            <HeaderIconButton accessibilityLabel="关闭" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="关闭" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }
@@ -530,7 +531,7 @@ export default function SettingsScreen() {
         </View>
 
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           className="mt-5 items-center rounded-2xl bg-primary py-3.5 active:opacity-80 dark:bg-primary-d"
         >
           <Text className="text-[15px] font-bold text-white dark:text-on-bright-d">完成</Text>

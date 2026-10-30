@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { HeaderIconButton, PageHeader } from '@/components/home/Header';
 import { Icon } from '@/components/ui/Icon';
@@ -116,7 +117,7 @@ export default function GuideScreen() {
           title="开始指南"
           subtitle="设置好之后，退出应用也能按时收到提醒。"
           action={
-            <HeaderIconButton accessibilityLabel="关闭" onPress={() => router.back()}>
+            <HeaderIconButton accessibilityLabel="关闭" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
             </HeaderIconButton>
           }
@@ -228,14 +229,14 @@ export default function GuideScreen() {
         </View>
 
         <View className="mt-4 flex-row items-center">
-          <Pressable onPress={() => router.back()} className="px-3 py-3 active:opacity-70">
+          <Pressable onPress={() => goBack()} className="px-3 py-3 active:opacity-70">
             <TextMuted className="text-[13px]">稍后设置</TextMuted>
           </Pressable>
           <View className="flex-1" />
           <Pressable
             onPress={async () => {
               setOnboarded(true);
-              router.back();
+              goBack();
               const ok = await Perms.notificationsEnabled();
               if (!ok) await Perms.requestNotifications();
             }}
