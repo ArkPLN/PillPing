@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/lib/**/*.ts", "src/types/svg.d.ts"],
+  "exclude": ["node_modules", "legacy", "src/lib/icons.ts"]
+}
