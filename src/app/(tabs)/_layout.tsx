@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/ui/Icon';
+import { TabBarButton } from '@/components/ui/TabBarButton';
 import { useTheme } from '@/lib/theme';
 
 /**
@@ -31,6 +32,7 @@ export default function TabsLayout() {
           fontSize: 10.5,
           fontWeight: '500',
         },
+        tabBarButton: TabBarButton,
       }}
     >
       <Tabs.Screen

@@ -5,11 +5,11 @@
  * ZoneId.systemDefault() 语义相同。
  */
 
-const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+import { DAY_MS } from '../constants/time';
+import { pad2 } from '../utils/number';
+import { startOfDay } from '../utils/datetime';
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
+const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 /** 对应 legacy Fmt.time：HH:mm */
 export function formatTime(millis: number): string {
@@ -39,15 +39,11 @@ export function todayKey(): string {
   return dateKey(Date.now());
 }
 
-function startOfDay(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
 /** 对应 legacy Fmt.dayLabel：今天 / 明天 / 昨天 / M月d日 */
 export function dayLabel(millis: number): string {
   const d = new Date(millis);
   const today = new Date();
-  const diffDays = Math.round((startOfDay(d) - startOfDay(today)) / 86_400_000);
+  const diffDays = Math.round((startOfDay(d) - startOfDay(today)) / DAY_MS);
   if (diffDays === 0) return '今天';
   if (diffDays === 1) return '明天';
   if (diffDays === -1) return '昨天';
