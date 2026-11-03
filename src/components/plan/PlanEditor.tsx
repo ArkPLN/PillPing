@@ -79,18 +79,18 @@ export function PlanEditor({
 
   return (
     <View>
-      <View className="pd-field">
-        <View className="mb-1.5">
-          <SelectField
-            value={value.type}
-            options={[
-              { value: 'daily', label: '每天固定' },
-              { value: 'weekly', label: '按周循环' },
-              { value: 'interval', label: '按间隔' },
-            ]}
-            onChange={(t) => setType(t as PlanType)}
-          />
-        </View>
+      <View className="mb-1.5">
+        <SelectField
+          title="计划类型"
+          testID="plan-type"
+          value={value.type}
+          options={[
+            { value: 'daily', label: '每天固定' },
+            { value: 'weekly', label: '按周循环' },
+            { value: 'interval', label: '按间隔' },
+          ]}
+          onChange={(t) => setType(t as PlanType)}
+        />
       </View>
 
       {value.type !== 'interval' ? (
@@ -104,6 +104,8 @@ export function PlanEditor({
           <View className="mt-2 flex-row items-center gap-2">
             <View className="w-[104px]">
               <SelectField
+                title="服药时机"
+                testID="plan-meal"
                 value={meal}
                 options={[
                   { value: 'after', label: '饭后' },
@@ -131,6 +133,7 @@ export function PlanEditor({
               时刻与用量
             </Text>
             <Pressable
+              testID="plan-add-slot"
               onPress={() => updateSlots(addPlanSlot(value.slots, medUnit, genId))}
               className="flex-row items-center gap-1 rounded-full bg-field px-2.5 py-1.5 active:opacity-70 dark:bg-field-d"
             >
@@ -139,11 +142,13 @@ export function PlanEditor({
             </Pressable>
           </View>
 
-          {value.slots.map((slot) => (
+          {value.slots.map((slot, index) => (
             <PlanSlotRow
               key={slot.id}
               slot={slot}
               medUnit={medUnit}
+              index={index}
+              canRemove={value.slots.length > 1}
               onChange={(patch) => updateSlots(updatePlanSlot(value.slots, slot.id, patch))}
               onRemove={() => updateSlots(removePlanSlot(value.slots, slot.id))}
             />
@@ -151,6 +156,7 @@ export function PlanEditor({
 
           <View className="mt-3 flex-row items-center gap-2">
             <NumericInput
+              testID="plan-template-name"
               value={templateNameText}
               onChangeText={setTemplateNameText}
               placeholder={templateName(3, meal)}

@@ -207,6 +207,7 @@ export default function SpecialFormScreen() {
       <ScrollView
         className="flex-1"
         contentContainerClassName="px-5 pb-7"
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <PageHeader
@@ -219,19 +220,29 @@ export default function SpecialFormScreen() {
         />
 
         <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">名称</TextMuted>
-        <Field value={draft.name} onChangeText={(v) => patch({ name: v })} placeholder="名称" />
+        <Field
+          testID="special-name"
+          value={draft.name}
+          onChangeText={(v) => patch({ name: v })}
+          placeholder="名称"
+        />
 
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">每次用量</TextMuted>
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">每次用量</TextMuted>
         <View className="flex-row items-center gap-2">
           <NumericInput
+            testID="special-qty"
+            maxFontSizeMultiplier={1.3}
             value={draft.doseQty}
             onChangeText={(v) => patch({ doseQty: v })}
             placeholder="数量"
             accessibilityLabel="数量"
             className="w-[76px] rounded-[14px] border border-line bg-field px-3 py-3 text-center text-[15px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d"
           />
-          <View className="w-[92px]">
+          <View className="w-[120px]">
             <SelectField
+              title="单位"
+              testID="special-unit"
+              columns={4}
               value={draft.doseUnit}
               options={UNITS.map((u) => ({ value: u, label: u }))}
               onChange={(unit) => patch({ doseUnit: unit })}
@@ -239,8 +250,10 @@ export default function SpecialFormScreen() {
           </View>
         </View>
 
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">剂型</TextMuted>
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">剂型</TextMuted>
         <SelectField
+          title="剂型"
+          testID="special-form"
           value={draft.form}
           options={formOptions}
           onChange={(f) => {
@@ -249,8 +262,10 @@ export default function SpecialFormScreen() {
           }}
         />
 
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">服用方式</TextMuted>
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">服用方式</TextMuted>
         <SelectField
+          title="服用方式"
+          testID="special-method"
           value={draft.method}
           options={METHODS.map((m) => ({ value: m, label: m }))}
           onChange={(method) => patch({ method })}
@@ -259,6 +274,8 @@ export default function SpecialFormScreen() {
         <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">使用频率</TextMuted>
         <View className="rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
           <SelectField
+            title="使用频率"
+            testID="special-mode"
             value={draft.mode}
             options={[
               { value: SPECIAL_MODE_ONCE, label: '一次性（单日内多次）' },
@@ -420,20 +437,35 @@ export default function SpecialFormScreen() {
           </>
         ) : null}
 
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">备注</TextMuted>
-        <Field value={draft.note} onChangeText={(v) => patch({ note: v })} placeholder="备注" multiline />
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">备注</TextMuted>
+        <Field
+          testID="special-note"
+          value={draft.note}
+          onChangeText={(v) => patch({ note: v })}
+          placeholder="备注"
+          multiline
+        />
 
-        <View className="mt-5 flex-row items-center gap-2">
+        <View className="mt-6 flex-row items-center gap-2">
           {!isNew && (
-            <Pressable onPress={() => setConfirmDelete(true)} className="px-2 py-3 active:opacity-70">
+            <Pressable
+              testID="special-delete"
+              onPress={() => setConfirmDelete(true)}
+              className="px-2 py-3 active:opacity-70"
+            >
               <Text className="text-[14px] font-medium text-danger dark:text-danger-d">删除</Text>
             </Pressable>
           )}
           <View className="flex-1" />
-          <Pressable onPress={() => goBack()} className="px-3 py-3 active:opacity-70">
+          <Pressable
+            testID="special-cancel"
+            onPress={() => goBack()}
+            className="px-3 py-3 active:opacity-70"
+          >
             <TextMuted className="text-[14px]">取消</TextMuted>
           </Pressable>
           <Pressable
+            testID="special-save"
             onPress={save}
             className="w-[112px] items-center rounded-2xl bg-violet py-3 active:opacity-80 dark:bg-violet-d"
           >

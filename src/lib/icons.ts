@@ -29,6 +29,7 @@ export const ICONS = {
   check: { family: 'mi', name: 'check' },
   close: { family: 'mi', name: 'close' },
   chevron: { family: 'mi', name: 'chevron-right' },
+  chevronDown: { family: 'mi', name: 'expand-more' },
   settings: { family: 'mi', name: 'settings' },
   trash: { family: 'mi', name: 'delete' },
   bell: { family: 'mi', name: 'notifications' },

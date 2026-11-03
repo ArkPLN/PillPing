@@ -14,25 +14,35 @@ import type { PlanSlot } from '@/lib/types';
 export function PlanSlotRow({
   slot,
   medUnit,
+  index,
+  canRemove = true,
   onChange,
   onRemove,
 }: {
   slot: PlanSlot;
   medUnit: string;
+  index: number;
+  canRemove?: boolean;
   onChange: (patch: Partial<PlanSlot>) => void;
   onRemove: () => void;
 }) {
   const { color } = useTheme();
   return (
-    <View className="mt-2 flex-row flex-wrap items-center gap-1.5 rounded-[13px] border border-line bg-card p-2.5 dark:border-line-d dark:bg-card-d">
+    <View className="mt-2 flex-row items-center gap-1 rounded-[13px] border border-line bg-card p-2 dark:border-line-d dark:bg-card-d">
       <TimeField
+        variant="compact"
+        testID={`plan-slot-${index}-time`}
         hour={slot.hour}
         minute={slot.minute}
         onChange={(hour, minute) => onChange({ hour, minute })}
       />
-      <View className="min-w-[86px] flex-1">
+      <View className="min-w-0 flex-1">
         <SelectField
+          variant="compact"
+          title="时段标注"
+          testID={`plan-slot-${index}-label`}
           value={slot.label ?? ''}
+          displayValue={slot.label ? slot.label.split(' · ')[0] : undefined}
           options={[
             { value: '', label: '未标注' },
             ...SLOT_LABELS.map((l) => ({ value: l, label: l })),
@@ -41,14 +51,20 @@ export function PlanSlotRow({
         />
       </View>
       <NumericInput
+        testID={`plan-slot-${index}-qty`}
+        maxFontSizeMultiplier={1.2}
         value={slot.qty ?? ''}
         onChangeText={(qty) => onChange({ qty })}
         placeholder="继承"
         accessibilityLabel="数量"
-        className="w-[54px] rounded-[9px] border border-line bg-field px-2 py-2 text-center text-[12.5px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d"
+        className="min-h-[34px] w-[40px] rounded-[9px] border border-line bg-field px-1 py-1.5 text-center text-[12.5px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d"
       />
-      <View className="w-[68px]">
+      <View className="w-[56px]">
         <SelectField
+          variant="compact"
+          columns={4}
+          title="单位"
+          testID={`plan-slot-${index}-unit`}
           value={slot.unit || medUnit}
           options={UNITS.map((u) => ({ value: u, label: u }))}
           onChange={(unit) => onChange({ unit })}
@@ -56,10 +72,16 @@ export function PlanSlotRow({
       </View>
       <Pressable
         onPress={onRemove}
+        disabled={!canRemove}
+        accessibilityRole="button"
         accessibilityLabel="删除时刻"
-        className="h-8 w-8 items-center justify-center rounded-[9px] bg-field active:opacity-70 dark:bg-field-d"
+        accessibilityState={{ disabled: !canRemove }}
+        testID={`plan-slot-${index}-remove`}
+        className={`h-8 w-8 items-center justify-center rounded-[9px] bg-field active:opacity-70 dark:bg-field-d ${
+          canRemove ? '' : 'opacity-40'
+        }`}
       >
-        <Icon name="trash" size={15} color={color('muted')} />
+        <Icon name="trash" size={14} color={color('muted')} />
       </Pressable>
     </View>
   );

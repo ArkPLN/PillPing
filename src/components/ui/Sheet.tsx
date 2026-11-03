@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useTheme } from '@/lib/theme';
 import { Icon } from './Icon';
 
 /**
@@ -34,6 +35,7 @@ export function Sheet({
   footer?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { color } = useTheme();
 
   return (
     <Modal
@@ -65,7 +67,7 @@ export function Sheet({
                 onPress={onClose}
                 className="h-[38px] w-[38px] items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
               >
-                <Icon name="close" size={22} color="#64746F" />
+                <Icon name="close" size={22} color={color('muted')} />
               </Pressable>
             </View>
 

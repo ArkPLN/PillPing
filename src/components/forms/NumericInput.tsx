@@ -12,12 +12,16 @@ export function NumericInput({
   placeholder,
   className,
   accessibilityLabel,
+  testID,
+  maxFontSizeMultiplier,
 }: {
   value: string;
   onChangeText: (v: string) => void;
   placeholder?: string;
   className?: string;
   accessibilityLabel?: string;
+  testID?: string;
+  maxFontSizeMultiplier?: number;
 }) {
   const { color } = useTheme();
   return (
@@ -27,6 +31,8 @@ export function NumericInput({
       placeholder={placeholder}
       placeholderTextColor={color('muted')}
       accessibilityLabel={accessibilityLabel}
+      testID={testID}
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
       className={
         className ??
         'rounded-[14px] border border-line bg-field px-3.5 py-3 text-[15px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d'
