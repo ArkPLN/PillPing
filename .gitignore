@@ -52,3 +52,9 @@ legacy/medbuild/
 .yarn/cache
 .yarn/install-state.gz
 .pnp.*
+
+# Agent
+/.agents/*
+/.claude
+/.opencode
+/.zcode
