@@ -13,14 +13,16 @@ import { Bold, Medium, TextBody, TextMuted } from '@/components/ui/Text';
 import { buildSchedulerInput } from '@/lib/notifications/input';
 import { scheduleTestIn, syncAll } from '@/lib/notifications/scheduler';
 import { presentNow } from '@/lib/notifications/scheduler';
-import { formatMonthDay, formatTime } from '@/lib/format';
+import { formatTime, todayKey } from '@/lib/format';
 import * as Perms from '@/lib/perms';
 import { usePerms } from '@/lib/usePerms';
 import { useTheme, THEME_DARK, THEME_LIGHT, THEME_SYSTEM } from '@/lib/theme';
 import { useStore } from '@/store/useStore';
 import { useNow } from '@/lib/useNow';
-import { formatDuration } from '@/lib/format';
-import { activeMedCount } from '@/lib/med';
+import { isCourseActive } from '@/lib/med';
+import { aggregateDay } from '@/lib/timeline';
+import { slotDose } from '@/lib/plan';
+import { formatDose } from '@/lib/units';
 
 /** 通用设置行（标题 + 副标题 + 右侧动作）。 */
 function Row({
@@ -109,15 +111,7 @@ export default function SettingsScreen() {
   const { mode, setMode, isDark, color } = useTheme();
 
   const store = useStore();
-  const {
-    meds,
-    interval,
-    doseCount,
-    remindersEnabled,
-    specials,
-    cycle,
-    history,
-  } = store;
+  const { meds, records, remindersEnabled, specials } = store;
 
   const [permKey, setPermKey] = useState(0);
   const perms = usePerms(permKey);
@@ -140,47 +134,6 @@ export default function SettingsScreen() {
       }
     },
     [store]
-  );
-
-  /* ---------------- 加/减次数与间隔 ---------------- */
-  const changeDoseCount = useCallback(
-    (delta: number) => {
-      const next = Math.max(1, Math.min(12, doseCount + delta));
-      if (next === doseCount) return;
-
-      const removesTaken =
-        cycle != null && cycle.status.slice(next).some((s) => s === 1);
-
-      const apply = async () => {
-        store.setDoseCount(next);
-        await syncAll(buildSchedulerInput());
-        Alert.alert('已修改', `已改为每天 ${next} 次`);
-      };
-
-      if (removesTaken) {
-        Alert.alert(
-          '减少服药次数',
-          `减少次数会删除今天已记录的后几次服药记录，确定要改为每天 ${next} 次吗？`,
-          [
-            { text: '取消', style: 'cancel' },
-            { text: '确定修改', onPress: apply },
-          ]
-        );
-        return;
-      }
-      apply();
-    },
-    [doseCount, cycle, store]
-  );
-
-  const changeInterval = useCallback(
-    async (next: number) => {
-      const v = Math.max(1, Math.min(12, next));
-      if (v === interval) return;
-      store.setInterval(v);
-      await syncAll(buildSchedulerInput());
-    },
-    [interval, store]
   );
 
   /* ---------------- 测试 ---------------- */
@@ -214,19 +167,21 @@ export default function SettingsScreen() {
   }, []);
 
   const sendPreview = useCallback(async () => {
-    if (!cycle) {
-      Alert.alert('提示', '记录第一次服药后即可预览');
+    const agg = aggregateDay(meds, records, todayKey(), Date.now());
+    const entry = agg.entries.find((e) => e.status === 'pending' || e.status === 'missed');
+    if (!entry) {
+      Alert.alert('提示', '今天没有待服用的剂量');
       return;
     }
-    const input = buildSchedulerInput();
-    const idx = cycle.status.findIndex((s) => s === 0);
-    const i = idx < 0 ? 0 : idx;
+    const dose = entry.slot
+      ? slotDose(entry.med, entry.slot)
+      : { qty: entry.med.doseQty, unit: entry.med.doseUnit };
     await presentNow({
-      title: `预览 · 该吃药了 · 第${i + 1}次`,
-      body: input.bigTextForSlot(i),
+      title: '预览 · 该吃药了',
+      body: `${entry.med.name} ${formatDose(dose.qty, dose.unit)}（${entry.med.method}）`,
     });
     Alert.alert('已发送预览', '请下拉通知栏查看');
-  }, [cycle]);
+  }, [meds, records]);
 
   /* ---------------- 数据 ---------------- */
   const doClearToday = useCallback(async () => {
@@ -244,8 +199,9 @@ export default function SettingsScreen() {
   }, [store]);
 
   const version = Constants.expoConfig?.version ?? '2.0.0';
-  const activeCount = activeMedCount(meds, now);
-  const pendingCount = cycle ? cycle.status.filter((s) => s === 0).length : 0;
+  const activeCount = meds.filter((m) => m.enabled && isCourseActive(m, now)).length;
+  const todayAgg = aggregateDay(meds, records, todayKey(), now);
+  const pendingCount = Math.max(0, todayAgg.total - todayAgg.taken);
 
 
   return (
@@ -292,81 +248,8 @@ export default function SettingsScreen() {
         </View>
         <TextMuted className="mt-1 text-[11px]">跟随系统时，应用会随手机的深色/浅色模式自动切换。</TextMuted>
 
-        {/* 服药节奏 */}
-        <Section>服药节奏</Section>
-
-        {/* 次数 */}
-        <View className="rounded-2xl border border-line bg-card p-3.5 dark:border-line-d dark:bg-card-d">
-          <View className="flex-row items-center">
-            <View className="flex-1">
-              <Medium className="text-[14px]">每天服药次数</Medium>
-              <TextMuted className="mt-0.5 text-[11.5px]">当前每天 {doseCount} 次</TextMuted>
-            </View>
-            <View className="flex-row items-center">
-              <Pressable
-                onPress={() => changeDoseCount(-1)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">−</Text>
-              </Pressable>
-              <View className="min-w-[64px] items-center">
-                <Text className="text-[15px] font-bold text-primary dark:text-primary-d">
-                  {doseCount} 次
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => changeDoseCount(1)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">+</Text>
-              </Pressable>
-            </View>
-          </View>
-          <TextMuted className="mt-2.5 text-[11.5px] leading-[15px]">
-            可设置 1–12 次。修改后今天尚未服用的次数会按新方案重排。
-          </TextMuted>
-        </View>
-
-        {/* 间隔 */}
-        <View className="mt-2 rounded-2xl border border-line bg-card p-3.5 dark:border-line-d dark:bg-card-d">
-          <View className="flex-row items-center">
-            <View className="flex-1">
-              <Medium className="text-[14px]">服药间隔</Medium>
-              <TextMuted className="mt-0.5 text-[11.5px]">最近一次实际服药后 {interval} 小时</TextMuted>
-            </View>
-            <View className="flex-row items-center">
-              <Pressable
-                onPress={() => changeInterval(interval - 1)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">−</Text>
-              </Pressable>
-              <View className="min-w-[64px] items-center">
-                <Text className="text-[15px] font-bold text-primary dark:text-primary-d">
-                  {interval} 小时
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => changeInterval(interval + 1)}
-                className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">+</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View className="mt-2.5 flex-row flex-wrap gap-1.5">
-            {[3, 4, 5, 6, 8, 10, 12].map((h) => (
-              <Chip key={h} label={`${h} 小时`} selected={h === interval} onPress={() => changeInterval(h)} />
-            ))}
-          </View>
-
-          <TextMuted className="mt-2.5 text-[11.5px] leading-[15px]">
-            每次实际服药后，下一次提醒会从实际时间重新计算，而不是固定按第一次推算。
-          </TextMuted>
-        </View>
-
-        <View className="mt-2">
+        {/* 开始指南 */}
+        <View className="mt-4">
           <Row
             title="开始指南"
             subtitle="检查通知、横幅、精确提醒和后台运行"

@@ -7,14 +7,14 @@ import { MedCard } from '@/components/meds/MedCard';
 import { AddMoreButton, EmptyState, InfoBanner } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { TextMuted } from '@/components/ui/Text';
-import { activeMedCount } from '@/lib/med';
+import { isCourseActive } from '@/lib/med';
 import { useNow } from '@/lib/useNow';
 import { useTheme } from '@/lib/theme';
 import { useStore } from '@/store/useStore';
 import { useRouter } from 'expo-router';
 
 /**
- * 药物页。对应 legacy MainActivity.buildMeds()。
+ * 药物页。
  */
 export default function MedsScreen() {
   const router = useRouter();
@@ -23,7 +23,6 @@ export default function MedsScreen() {
   const { color } = useTheme();
 
   const meds = useStore((s) => s.meds);
-  const doseCount = useStore((s) => s.doseCount);
   const toggleMedEnabled = useStore((s) => s.toggleMedEnabled);
 
   const openNew = useCallback(() => {
@@ -37,7 +36,10 @@ export default function MedsScreen() {
     [router]
   );
 
-  const activeCount = useMemo(() => activeMedCount(meds, now), [meds, now]);
+  const activeCount = useMemo(
+    () => meds.filter((m) => m.enabled && isCourseActive(m, now)).length,
+    [meds, now]
+  );
 
   return (
     <ScrollView
@@ -59,7 +61,7 @@ export default function MedsScreen() {
       <View className="mt-3.5">
         <InfoBanner
           icon="pill"
-          text="每种药可以指定在第几次服用；停用后仍会保留在清单里。"
+          text="每种药可以设置独立的服药时间计划；停用后仍会保留在清单里。"
         />
       </View>
 
@@ -79,7 +81,6 @@ export default function MedsScreen() {
             <MedCard
               key={m.id}
               med={m}
-              doseCount={doseCount}
               onPress={() => openEdit(m.id)}
               onToggle={(v) => toggleMedEnabled(m.id)}
             />

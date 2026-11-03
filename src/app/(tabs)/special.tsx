@@ -11,6 +11,7 @@ import { useNow } from '@/lib/useNow';
 import { useTheme } from '@/lib/theme';
 import { useStore } from '@/store/useStore';
 import { useRouter } from 'expo-router';
+import { effectiveAt } from '@/lib/specialmed';
 
 import { resyncNotifications } from '@/lib/useHomeActions';
 
@@ -40,8 +41,8 @@ export default function SpecialScreen() {
   );
 
   const onTake = useCallback(
-    async (id: string, name: string) => {
-      markSpecialTaken(id, Date.now());
+    async (id: string, recordKey: string, name: string) => {
+      markSpecialTaken(id, recordKey);
       await resyncNotifications();
       Alert.alert('已记录', `已记录 ${name}`);
     },
@@ -49,8 +50,8 @@ export default function SpecialScreen() {
   );
 
   const onSnooze = useCallback(
-    async (id: string) => {
-      snoozeSpecial(id, 10);
+    async (id: string, recordKey: string) => {
+      snoozeSpecial(id, recordKey, 10);
       await resyncNotifications();
       Alert.alert('已推迟', '将在 10 分钟后提醒');
     },
@@ -58,8 +59,11 @@ export default function SpecialScreen() {
   );
 
   const onBackfill = useCallback(
-    (id: string) => {
-      router.push({ pathname: '/time-picker', params: { mode: 'special-backfill', id } });
+    (id: string, due: number) => {
+      router.push({
+        pathname: '/time-picker',
+        params: { mode: 'special-backfill', id, due: String(due) },
+      });
     },
     [router]
   );
@@ -82,7 +86,7 @@ export default function SpecialScreen() {
     >
       <PageHeader
         title="特殊用药"
-        subtitle="独立间隔或每天固定时间，不参与今日计划"
+        subtitle="一次性、每周计数或指定日期，不参与今日计划"
         action={
           <HeaderIconButton accessibilityLabel="添加特殊用药" onPress={openNew} tone="violet">
             <Icon name="add" size={21} color="#FFFFFF" />
@@ -94,7 +98,7 @@ export default function SpecialScreen() {
         <InfoBanner
           icon="clock"
           tone="violet"
-          text="适合每 8 小时、每 12 小时或每天 21:00 等特殊节奏；与普通药物分开提醒。"
+          text="适合一次性、每周 N 次或指定日期等不规则用药；与普通药物分开提醒。"
         />
       </View>
 
@@ -118,9 +122,9 @@ export default function SpecialScreen() {
               now={now}
               onPress={() => openEdit(m.id)}
               onToggle={(v) => onToggle(m.id, m.name, v)}
-              onTake={() => onTake(m.id, m.name)}
-              onBackfill={() => onBackfill(m.id)}
-              onSnooze={() => onSnooze(m.id)}
+              onTake={(recordKey) => onTake(m.id, recordKey, m.name)}
+              onBackfill={(recordKey) => onBackfill(m.id, effectiveAt(m))}
+              onSnooze={(recordKey) => onSnooze(m.id, recordKey)}
             />
           ))}
           <View className="mt-1">

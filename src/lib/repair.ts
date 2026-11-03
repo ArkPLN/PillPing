@@ -1,32 +1,23 @@
 /**
- * 反序列化后的数据自愈。对应 legacy Store.load() 里的三段修复逻辑：
+ * 反序列化后的数据自愈：
  *
- * 1. courseDays > 0 但 courseStart <= 0 的药物，用今天零点补齐
- *    （legacy: for (Med m : meds) if (m.courseDays > 0 && m.courseStart <= 0L) m.courseStart = today）
- * 2. 特殊用药 nextAt <= 0 时按当前时间重算
- *    （legacy: for (SpecialMed m : specials) if (m.nextAt <= 0L) m.nextAt = m.computeNext(now)）
- * 3. 旧/损坏的 cycle（曾按「第一次 + N×间隔」排错）若无推迟记录，按链式规则重新投影
- *    （legacy: if (!hasSnooze) s.cycle.projectPendingFromLastTaken(s.interval)）
+ * 1. courseDays > 0 但 courseStart <= 0 的药物，用今天零点补齐；
+ * 2. 特殊用药 nextAt <= 0 且启用时按当前时间重算；
+ * 3. 丢弃找不到所属药物的孤儿剂量记录，并补齐特殊用药的记录/日期/时刻字段。
  *
- * 抽成纯函数以便单测，不含任何 React/存储依赖。
+ * 纯函数，不含 React/存储依赖。
  */
 
-import { isStarted, projectPendingFromLastTaken } from './cycle';
 import { computeNext } from './specialmed';
-import { DOSE_PENDING, type Cycle, type Med, type SpecialMed } from './types';
+import type { DoseRecord, Med, SpecialMed } from './types';
+
+import { startOfToday } from '../utils/datetime';
 
 export type RepairableState = {
   meds: Med[];
-  cycle: Cycle | null;
+  records: DoseRecord[];
   specials: SpecialMed[];
-  interval: number;
 };
-
-/** 今天零点的时间戳（本地时区）。 */
-export function startOfToday(now = Date.now()): number {
-  const d = new Date(now);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
 
 export function repairState<T extends RepairableState>(s: T, now = Date.now()): T {
   const todayStart = startOfToday(now);
@@ -35,17 +26,22 @@ export function repairState<T extends RepairableState>(s: T, now = Date.now()): 
     m.courseDays > 0 && m.courseStart <= 0 ? { ...m, courseStart: todayStart } : m
   );
 
-  const specials = s.specials.map((m) =>
-    m.nextAt > 0 ? m : { ...m, nextAt: computeNext(m, now) }
-  );
+  const medIds = new Set(meds.map((m) => m.id));
+  const records = s.records.filter((r) => medIds.has(r.medId));
 
-  let cycle = s.cycle;
-  if (cycle && isStarted(cycle)) {
-    const hasSnooze = cycle.status.some(
-      (st, i) => st === DOSE_PENDING && cycle!.snoozeUntil[i] > 0
-    );
-    if (!hasSnooze) cycle = projectPendingFromLastTaken(cycle, s.interval);
-  }
+  const specials = s.specials.map((m) => {
+    const normalized: SpecialMed = {
+      ...m,
+      times: Array.isArray(m.times) && m.times.length > 0 ? m.times : ['09:00'],
+      dates: Array.isArray(m.dates) ? m.dates : [],
+      records: Array.isArray(m.records) ? m.records : [],
+      weeklyTarget: m.weeklyTarget > 0 ? m.weeklyTarget : 3,
+      weeklyStepDays: m.weeklyStepDays > 0 ? m.weeklyStepDays : 2,
+      onceDate: m.onceDate ?? '',
+    };
+    if (!normalized.enabled) return normalized;
+    return normalized.nextAt > 0 ? normalized : { ...normalized, nextAt: computeNext(normalized, now) };
+  });
 
-  return { ...s, meds, specials, cycle };
+  return { ...s, meds, records, specials };
 }

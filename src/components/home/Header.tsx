@@ -101,14 +101,14 @@ export function PageHeader({
   action,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   action?: React.ReactNode;
 }) {
   return (
     <View className="flex-row items-start pb-1.5 pt-2.5">
       <View className="flex-1">
         <Bold className="text-[25px]">{title}</Bold>
-        <TextMuted className="mt-1 text-[12.5px]">{subtitle}</TextMuted>
+        {subtitle ? <TextMuted className="mt-1 text-[12.5px]">{subtitle}</TextMuted> : null}
       </View>
       {action}
     </View>

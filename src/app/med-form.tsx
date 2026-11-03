@@ -1,41 +1,43 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 
-import { FormPicker } from '@/components/forms/FormPicker';
-import { ConfirmDialog, NumberDialog } from '@/components/forms/Dialogs';
+import { ConfirmDialog } from '@/components/forms/Dialogs';
+import { NumericInput } from '@/components/forms/NumericInput';
+import { SelectField } from '@/components/forms/SelectField';
 import { HeaderIconButton, PageHeader } from '@/components/home/Header';
-import { Chip } from '@/components/ui/Pill';
+import { PlanEditor } from '@/components/plan/PlanEditor';
 import { Field } from '@/components/ui/Field';
-import { Medium, TextBody, TextMuted } from '@/components/ui/Text';
 import { Icon } from '@/components/ui/Icon';
+import { TextMuted } from '@/components/ui/Text';
 import { inferForm, FORM_NAMES } from '@/lib/forms';
 import type { FormKey } from '@/lib/icons';
 import { FORM_LABELS, FORMS_ORDER } from '@/lib/icons';
-import { isSlot, setSlot as setSlotBit } from '@/lib/med';
-import { formatMonthDay } from '@/lib/format';
+import { computeFollowupAt } from '@/lib/med';
+import { createTemplatePlan, clonePlanWithNewIds } from '@/lib/plan-template';
 import { buildSchedulerInput } from '@/lib/notifications/input';
 import { syncAll } from '@/lib/notifications/scheduler';
-import type { Med } from '@/lib/types';
+import type { Med, SchedulePlan } from '@/lib/types';
 import { METHODS } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
 import { goBack } from '@/lib/nav';
+import { startOfToday } from '@/utils/datetime';
+import { genId } from '@/utils/id';
+import { DEFAULT_UNIT, UNITS } from '@/lib/units';
+import { DAY_MS } from '@/constants/time';
 
-/** 表单内部状态（从 Med 映射而来）。 */
 type Draft = {
   name: string;
-  dose: string;
+  doseQty: string;
+  doseUnit: string;
   form: FormKey;
   method: string;
   note: string;
-  allDoses: boolean;
-  slotMask: number;
-  courseDays: number;
-  courseStart: number;
-  followupDays: number;
-  nextFollowupAt: number;
+  plan: SchedulePlan;
+  courseDays: string;
+  followupDays: string;
 };
 
 function formKeyOf(form: string): FormKey {
@@ -43,36 +45,32 @@ function formKeyOf(form: string): FormKey {
   return entry ?? 'tablet';
 }
 
-const DOSE_QUICK = ['半片', '1片', '2片', '1粒', '2粒', '5ml', '10ml'];
-const COURSE_PRESETS: { label: string; days: number }[] = [
-  { label: '长期', days: 0 },
-  { label: '7 天', days: 7 },
-  { label: '14 天', days: 14 },
-  { label: '30 天', days: 30 },
-  { label: '90 天', days: 90 },
-];
-const FOLLOWUP_PRESETS = [
-  { label: '14 天', days: 14 },
-  { label: '30 天', days: 30 },
-  { label: '90 天', days: 90 },
-];
-
-function startOfToday(): number {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function defaultPlan(): SchedulePlan {
+  return createTemplatePlan(3, 'after', genId);
 }
 
+const FOLLOWUP_OPTIONS = [
+  { value: '0', label: '不提醒' },
+  { value: '1', label: '第1天' },
+  { value: '3', label: '第3天' },
+  { value: '5', label: '第5天' },
+  { value: '7', label: '1周' },
+  { value: '14', label: '2周' },
+  { value: '21', label: '3周' },
+  { value: '28', label: '4周' },
+];
+
 export default function MedFormScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { color } = useTheme();
 
   const { id } = useLocalSearchParams<{ id?: string }>();
   const meds = useStore((s) => s.meds);
-  const doseCount = useStore((s) => s.doseCount);
+  const templates = useStore((s) => s.templates);
   const addMed = useStore((s) => s.addMed);
   const updateMed = useStore((s) => s.updateMed);
   const removeMed = useStore((s) => s.removeMed);
+  const saveTemplate = useStore((s) => s.saveTemplate);
 
   const editing = useMemo(() => meds.find((m) => m.id === id), [meds, id]);
   const isNew = !editing;
@@ -81,123 +79,94 @@ export default function MedFormScreen() {
     if (editing) {
       return {
         name: editing.name,
-        dose: editing.dose,
+        doseQty: editing.doseQty,
+        doseUnit: editing.doseUnit,
         form: formKeyOf(editing.form),
         method: editing.method,
         note: editing.note,
-        allDoses: editing.allDoses,
-        slotMask: editing.slotMask,
-        courseDays: editing.courseDays,
-        courseStart: editing.courseStart,
-        followupDays: editing.followupDays,
-        nextFollowupAt: editing.nextFollowupAt,
+        plan: editing.plan,
+        courseDays: String(editing.courseDays),
+        followupDays: String(editing.followupDays),
       };
     }
     return {
       name: '',
-      dose: '',
+      doseQty: '1',
+      doseUnit: DEFAULT_UNIT,
       form: 'tablet',
       method: '口服',
       note: '',
-      allDoses: true,
-      slotMask: 0,
-      courseDays: 0,
-      courseStart: 0,
-      followupDays: 0,
-      nextFollowupAt: 0,
+      plan: defaultPlan(),
+      courseDays: '5',
+      followupDays: '1',
     };
   });
 
-  const [numDialog, setNumDialog] = useState<null | 'course' | 'followup'>(null);
+  const [formTouched, setFormTouched] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const patch = useCallback((p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p })), []);
 
-  // 药名/用量变化时自动推断剂型（仅新建且用户未手动改过）
-  const [formTouched, setFormTouched] = useState(false);
-  const autoForm = useCallback(() => {
+  // 药名/用量变化时自动推断剂型（用户未手动改过）
+  React.useEffect(() => {
     if (formTouched) return;
-    const inferred = inferForm(draft.name, draft.dose, draft.method);
+    const inferred = inferForm(draft.name, `${draft.doseQty}${draft.doseUnit}`, draft.method);
     const key = formKeyOf(inferred);
     if (key !== draft.form) patch({ form: key });
-  }, [draft.name, draft.dose, draft.method, draft.form, formTouched, patch]);
-
-  React.useEffect(() => {
-    autoForm();
-  }, [autoForm]);
-
-  const toggleSlot = (i: number) => {
-    if (draft.allDoses) {
-      // 从「每次」切到「指定」，只选中当前点击的这一项
-      patch({ allDoses: false, slotMask: 1 << i });
-      return;
-    }
-    const med = { slotMask: draft.slotMask } as Med;
-    const next = setSlotBit(med, i, !isSlot(med, i));
-    patch({ slotMask: next.slotMask });
-  };
+  }, [draft.name, draft.doseQty, draft.doseUnit, draft.method, draft.form, formTouched, patch]);
 
   const save = useCallback(() => {
     const name = draft.name.trim();
-    const dose = draft.dose.trim();
     if (!name) {
       Alert.alert('提示', '请填写药名');
       return;
     }
-    if (!dose) {
+    if (!draft.doseQty.trim()) {
       Alert.alert('提示', '请填写每次用量');
       return;
     }
-    if (!draft.allDoses && draft.slotMask === 0) {
-      Alert.alert('提示', '请至少选择一次服药');
+    if (draft.plan.type !== 'interval' && draft.plan.slots.length === 0) {
+      Alert.alert('提示', '请至少设置一个时刻');
       return;
     }
 
-    const now = Date.now();
-    const courseStart =
-      draft.courseDays <= 0
-        ? 0
-        : draft.courseStart > 0 && !(editing && editing.courseDays <= 0)
-          ? draft.courseStart
-          : startOfToday();
+    const courseDays = Math.max(0, Math.min(365, Number(draft.courseDays) || 0));
+    const followupDays = Math.max(0, Math.min(365, Number(draft.followupDays) || 0));
 
-    let nextFollowupAt = 0;
-    if (draft.followupDays > 0) {
-      if (draft.nextFollowupAt > 0 && !(editing && editing.followupDays !== draft.followupDays)) {
-        nextFollowupAt = draft.nextFollowupAt;
-      } else {
-        nextFollowupAt = now + draft.followupDays * 86_400_000;
-      }
+    let courseStart = 0;
+    if (courseDays > 0) {
+      courseStart =
+        editing && editing.courseDays > 0 && editing.courseStart > 0
+          ? editing.courseStart
+          : startOfToday();
     }
 
     const base: Med = {
-      id: editing?.id ?? '',
+      id: editing?.id ?? genId(),
       name,
-      dose,
+      doseQty: draft.doseQty.trim(),
+      doseUnit: draft.doseUnit,
       method: draft.method,
       form: FORM_LABELS[draft.form],
       note: draft.note.trim(),
       enabled: editing?.enabled ?? true,
-      allDoses: draft.allDoses,
-      slotMask: draft.slotMask,
+      plan: draft.plan,
       color: editing?.color ?? meds.length % 7,
-      courseDays: draft.courseDays,
+      courseDays,
       courseStart,
-      followupDays: draft.followupDays,
-      nextFollowupAt,
+      followupDays,
+      nextFollowupAt: 0,
     };
+    base.nextFollowupAt = computeFollowupAt(base);
 
-    if (isNew) {
-      addMed({ ...base, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
-    } else {
-      updateMed(base);
-    }
+    if (isNew) addMed(base);
+    else updateMed(base);
 
     (async () => {
       await syncAll(buildSchedulerInput());
       goBack();
     })();
-  }, [draft, editing, isNew, meds.length, addMed, updateMed, router]);
+  }, [draft, editing, isNew, meds.length, addMed, updateMed]);
 
   const doDelete = useCallback(async () => {
     if (!editing) return;
@@ -205,7 +174,9 @@ export default function MedFormScreen() {
     setConfirmDelete(false);
     await syncAll(buildSchedulerInput());
     goBack();
-  }, [editing, removeMed, router]);
+  }, [editing, removeMed]);
+
+  const formOptions = FORMS_ORDER.map((k) => ({ value: k, label: FORM_LABELS[k] }));
 
   return (
     <View className="flex-1 bg-bg dark:bg-bg-d" style={{ paddingTop: insets.top }}>
@@ -216,7 +187,6 @@ export default function MedFormScreen() {
       >
         <PageHeader
           title={isNew ? '添加药物' : '编辑药物'}
-          subtitle={isNew ? '添加你每天要吃的药，提醒时会自动带上这些信息。' : '修改后，之后的提醒内容会同步更新。'}
           action={
             <HeaderIconButton accessibilityLabel="返回" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
@@ -224,219 +194,110 @@ export default function MedFormScreen() {
           }
         />
 
-        {/* 药名 */}
         <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">药名</TextMuted>
         <Field
           value={draft.name}
           onChangeText={(v) => patch({ name: v })}
-          placeholder="例如：维生素D"
+          placeholder="药名"
         />
 
-        {/* 用量 */}
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">每次用量</TextMuted>
-        <Field
-          value={draft.dose}
-          onChangeText={(v) => patch({ dose: v })}
-          placeholder="例如：1片 / 半粒 / 5ml"
-        />
-        <View className="mt-2 flex-row flex-wrap gap-1.5">
-          {DOSE_QUICK.map((q) => (
-            <Chip key={q} label={q} onPress={() => patch({ dose: q })} />
-          ))}
+        <View className="flex-row items-center gap-2">
+          <NumericInput
+            value={draft.doseQty}
+            onChangeText={(v) => patch({ doseQty: v })}
+            placeholder="数量"
+            accessibilityLabel="数量"
+            className="w-[76px] rounded-[14px] border border-line bg-field px-3 py-3 text-center text-[15px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d"
+          />
+          <View className="w-[92px]">
+            <SelectField
+              value={draft.doseUnit}
+              options={UNITS.map((u) => ({ value: u, label: u }))}
+              onChange={(unit) => patch({ doseUnit: unit })}
+            />
+          </View>
         </View>
 
-        {/* 剂型 */}
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">剂型</TextMuted>
-        <FormPicker
+        <SelectField
           value={draft.form}
+          options={formOptions}
           onChange={(f) => {
             setFormTouched(true);
-            patch({ form: f });
+            patch({ form: f as FormKey });
           }}
         />
 
-        {/* 服用方式 */}
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">服用方式</TextMuted>
-        <View className="flex-row flex-wrap gap-1.5">
-          {METHODS.map((m) => (
-            <Chip
-              key={m}
-              label={m}
-              selected={draft.method === m}
-              onPress={() => patch({ method: m })}
-            />
-          ))}
-        </View>
+        <SelectField
+          value={draft.method}
+          options={METHODS.map((m) => ({ value: m, label: m }))}
+          onChange={(method) => patch({ method })}
+        />
 
-        {/* 服用时机 */}
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">服用时机</TextMuted>
-        <View className="flex-row flex-wrap gap-1.5">
-          <Chip
-            label="每次"
-            selected={draft.allDoses}
-            onPress={() => patch({ allDoses: true })}
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">服药时间计划</TextMuted>
+        <View className="rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
+          <PlanEditor
+            value={draft.plan}
+            medQty={draft.doseQty}
+            medUnit={draft.doseUnit}
+            onChange={(plan) => patch({ plan })}
+            onSaveTemplate={(name, plan) => saveTemplate(name, plan)}
           />
-          {Array.from({ length: doseCount }).map((_, i) => (
-            <Chip
-              key={i}
-              label={`第${i + 1}次`}
-              selected={!draft.allDoses && isSlot({ slotMask: draft.slotMask } as Med, i)}
-              onPress={() => toggleSlot(i)}
-            />
-          ))}
-        </View>
-        <TextMuted className="mt-1.5 text-[11px] leading-[15px]">
-          选「每次」会自动包含以后新增的次数；也可以只选某几次。至少选择一次。
-        </TextMuted>
-
-        {/* 疗程 */}
-        <View className="mt-3.5 flex-row items-center gap-1.5">
-          <Icon name="calendar" size={17} color={color('muted')} />
-          <TextMuted className="text-[12.5px] font-medium">服药周期</TextMuted>
-        </View>
-        <View className="mt-1.5 rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
-          <View className="flex-row flex-wrap items-center">
-            <View className="flex-1 pr-2">
-              <Medium className="text-[13.5px]">连续服用天数</Medium>
-              <TextMuted className="mt-0.5 text-[11px]">0 = 不限制；到期后自动停止该药提醒</TextMuted>
+          {templates.length > 0 ? (
+            <View className="mt-3 flex-row flex-wrap items-center gap-1.5">
+              <Text className="text-[11.5px] text-muted dark:text-muted-d">模板</Text>
+              {templates.map((t) => (
+                <Pressable
+                  key={t.id}
+                  onPress={() => patch({ plan: clonePlanWithNewIds(t.plan, genId) })}
+                  className="rounded-full bg-card px-2.5 py-1 active:opacity-70 dark:bg-card-d"
+                >
+                  <Text className="text-[11.5px] text-muted dark:text-muted-d">{t.name}</Text>
+                </Pressable>
+              ))}
             </View>
-            <View className="flex-row items-center">
-              <Pressable
-                onPress={() => {
-                  const v = Math.max(0, draft.courseDays - 1);
-                  patch({
-                    courseDays: v,
-                    courseStart: v > 0 && draft.courseStart <= 0 ? startOfToday() : draft.courseStart,
-                  });
-                }}
-                className="h-9 w-9 items-center justify-center rounded-full bg-card active:opacity-70 dark:bg-card-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">−</Text>
-              </Pressable>
-              <View className="min-w-[70px] items-center">
-                <Text className="text-[14px] font-bold text-primary dark:text-primary-d">
-                  {draft.courseDays <= 0 ? '不限制' : `${draft.courseDays} 天`}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  const v = Math.min(365, draft.courseDays + 1);
-                  patch({ courseDays: v, courseStart: draft.courseStart <= 0 ? startOfToday() : draft.courseStart });
-                }}
-                className="h-9 w-9 items-center justify-center rounded-full bg-card active:opacity-70 dark:bg-card-d"
-              >
-                <Text className="text-[18px] text-primary dark:text-primary-d">+</Text>
-              </Pressable>
-              <Pressable onPress={() => setNumDialog('course')} className="ml-1 px-1.5 py-2">
-                <Text className="text-[12px] font-medium text-primary dark:text-primary-d">输入</Text>
-              </Pressable>
-            </View>
-          </View>
+          ) : null}
+        </View>
 
-          <View className="mt-2 flex-row flex-wrap gap-1.5">
-            {COURSE_PRESETS.map((p) => (
-              <Chip
-                key={p.label}
-                label={p.label}
-                selected={draft.courseDays === p.days}
-                onPress={() =>
-                  patch({
-                    courseDays: p.days,
-                    courseStart: p.days > 0 ? startOfToday() : 0,
-                  })
-                }
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">疗程与复诊</TextMuted>
+        <View className="rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
+          <View className="flex-row items-center justify-between">
+            <Text className="text-[13px] text-ink dark:text-ink-d">连续服用天数</Text>
+            <View className="flex-row items-center gap-1.5">
+              <NumericInput
+                value={draft.courseDays}
+                onChangeText={(v) => patch({ courseDays: v })}
+                accessibilityLabel="连续服用天数"
+                className="w-[64px] rounded-[10px] border border-line bg-card px-2 py-2 text-center text-[13px] text-ink dark:border-line-d dark:bg-card-d dark:text-ink-d"
               />
-            ))}
-          </View>
-
-          <TextMuted className="mt-2 text-[11px]">
-            {draft.courseDays <= 0
-              ? '长期服用'
-              : `疗程至 ${formatMonthDay(startOfToday() + draft.courseDays * 86_400_000 - 1)}`}
-          </TextMuted>
-          <TextMuted className="mt-0.5 text-[10.5px]">也可直接点上方「输入」填写天数。</TextMuted>
-        </View>
-
-        {/* 复诊 */}
-        <View className="mt-3.5 flex-row items-center gap-1.5">
-          <Icon name="heart" size={17} color={color('muted')} />
-          <TextMuted className="text-[12.5px] font-medium">复诊提醒</TextMuted>
-        </View>
-        <View className="mt-1.5 rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
-          <View className="flex-row flex-wrap items-center">
-            <View className="flex-1 pr-2">
-              <Medium className="text-[13.5px]">复诊间隔</Medium>
-              <TextMuted className="mt-0.5 text-[11px]">0 = 不提醒；服药期间定期复诊</TextMuted>
-            </View>
-            <View className="flex-row items-center">
-              <Pressable
-                onPress={() => patch({ followupDays: Math.max(0, draft.followupDays - 1), nextFollowupAt: 0 })}
-                className="h-9 w-9 items-center justify-center rounded-full bg-card active:opacity-70 dark:bg-card-d"
-              >
-                <Text className="text-[18px] text-violet-text dark:text-violet-text-d">−</Text>
-              </Pressable>
-              <View className="min-w-[70px] items-center">
-                <Text className="text-[14px] font-bold text-violet-text dark:text-violet-text-d">
-                  {draft.followupDays <= 0 ? '不提醒' : `${draft.followupDays} 天`}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => patch({ followupDays: Math.min(365, draft.followupDays + 1), nextFollowupAt: 0 })}
-                className="h-9 w-9 items-center justify-center rounded-full bg-card active:opacity-70 dark:bg-card-d"
-              >
-                <Text className="text-[18px] text-violet-text dark:text-violet-text-d">+</Text>
-              </Pressable>
-              <Pressable onPress={() => setNumDialog('followup')} className="ml-1 px-1.5 py-2">
-                <Text className="text-[12px] font-medium text-primary dark:text-primary-d">输入</Text>
-              </Pressable>
+              <Text className="text-[12px] text-muted dark:text-muted-d">天</Text>
             </View>
           </View>
-
-          <View className="mt-2 flex-row flex-wrap gap-1.5">
-            {FOLLOWUP_PRESETS.map((p) => (
-              <Chip
-                key={p.label}
-                label={p.label}
-                selected={draft.followupDays === p.days}
-                onPress={() => patch({ followupDays: p.days, nextFollowupAt: 0 })}
+          <View className="mt-3.5 flex-row items-center justify-between">
+            <Text className="text-[13px] text-ink dark:text-ink-d">复诊提醒</Text>
+            <View className="w-[112px]">
+              <SelectField
+                value={draft.followupDays}
+                options={FOLLOWUP_OPTIONS}
+                onChange={(v) => patch({ followupDays: v })}
               />
-            ))}
+            </View>
           </View>
-
-          <TextMuted className="mt-2 text-[11px]">
-            {draft.followupDays <= 0
-              ? '不提醒复诊'
-              : draft.nextFollowupAt > 0
-                ? `复诊 ${formatMonthDay(draft.nextFollowupAt)}`
-                : `每 ${draft.followupDays} 天复诊`}
-          </TextMuted>
-          <TextMuted className="mt-0.5 text-[10.5px]">也可直接点上方「输入」填写间隔天数。</TextMuted>
         </View>
 
-        <TextMuted className="mt-1.5 text-[11px] leading-[15px]">
-          疗程结束后该药不再出现在提醒里；复诊提醒只在该药疗程内生效，可单独关闭。
-        </TextMuted>
-
-        {/* 备注 */}
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">备注（可选）</TextMuted>
+        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">备注</TextMuted>
         <Field
           value={draft.note}
           onChangeText={(v) => patch({ note: v })}
-          placeholder="例如：饭后服用 / 不要和牛奶同服"
+          placeholder="备注"
           multiline
         />
 
-        <TextMuted className="mt-3.5 text-[11.5px]">
-          提醒通知会显示：药名、用量、剂型和服用方式。
-        </TextMuted>
-
-        {/* 操作 */}
         <View className="mt-5 flex-row items-center gap-2">
           {!isNew && (
-            <Pressable
-              onPress={() => setConfirmDelete(true)}
-              className="px-2 py-3 active:opacity-70"
-            >
+            <Pressable onPress={() => setConfirmDelete(true)} className="px-2 py-3 active:opacity-70">
               <Text className="text-[14px] font-medium text-danger dark:text-danger-d">删除</Text>
             </Pressable>
           )}
@@ -454,34 +315,6 @@ export default function MedFormScreen() {
 
         <View style={{ height: insets.bottom + 16 }} />
       </ScrollView>
-
-      <NumberDialog
-        visible={numDialog === 'course'}
-        title="设置服药天数"
-        hint="0 = 长期服用；也可以直接输入 1–365 天。"
-        initial={draft.courseDays}
-        min={0}
-        max={365}
-        onCancel={() => setNumDialog(null)}
-        onConfirm={(v) => {
-          setNumDialog(null);
-          patch({ courseDays: v, courseStart: v > 0 ? startOfToday() : 0 });
-        }}
-      />
-
-      <NumberDialog
-        visible={numDialog === 'followup'}
-        title="设置复诊间隔"
-        hint="0 = 不提醒；可以直接输入 1–365 天。"
-        initial={draft.followupDays}
-        min={0}
-        max={365}
-        onCancel={() => setNumDialog(null)}
-        onConfirm={(v) => {
-          setNumDialog(null);
-          patch({ followupDays: v, nextFollowupAt: 0 });
-        }}
-      />
 
       <ConfirmDialog
         visible={confirmDelete}

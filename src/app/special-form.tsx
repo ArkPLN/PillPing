@@ -1,38 +1,55 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { useLocalSearchParams } from 'expo-router';
 
-import { FormPicker } from '@/components/forms/FormPicker';
 import { ConfirmDialog } from '@/components/forms/Dialogs';
+import { DateField } from '@/components/forms/DateField';
+import { NumericInput } from '@/components/forms/NumericInput';
+import { SelectField } from '@/components/forms/SelectField';
+import { TimeField } from '@/components/forms/TimeField';
 import { HeaderIconButton, PageHeader } from '@/components/home/Header';
-import { Chip } from '@/components/ui/Pill';
 import { Field } from '@/components/ui/Field';
-import { Medium, TextMuted } from '@/components/ui/Text';
 import { Icon } from '@/components/ui/Icon';
+import { Chip } from '@/components/ui/Pill';
+import { TextMuted } from '@/components/ui/Text';
 import { inferForm } from '@/lib/forms';
-import { FORM_LABELS, type FormKey } from '@/lib/icons';
-import { computeNext, scheduleText } from '@/lib/specialmed';
-import { formatMonthDay, formatTime } from '@/lib/format';
+import { FORM_LABELS, FORMS_ORDER, type FormKey } from '@/lib/icons';
+import { computeNext } from '@/lib/specialmed';
+import { dateKey, dateKeyToCn, formatMonthDay, formatTime, todayKey } from '@/lib/format';
+import { parseTimeText } from '@/lib/plan';
 import { buildSchedulerInput } from '@/lib/notifications/input';
 import { syncAll } from '@/lib/notifications/scheduler';
-import type { SpecialMed } from '@/lib/types';
-import { METHODS, SPECIAL_MODE_DAILY, SPECIAL_MODE_INTERVAL, type SpecialMode } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 import { useTheme } from '@/lib/theme';
 import { goBack } from '@/lib/nav';
+import { pad2 } from '@/utils/number';
+import { genId } from '@/utils/id';
+import { DEFAULT_UNIT, UNITS } from '@/lib/units';
+import {
+  DOSE_SKIPPED,
+  DOSE_TAKEN,
+  METHODS,
+  SPECIAL_MODE_DATES,
+  SPECIAL_MODE_ONCE,
+  SPECIAL_MODE_WEEKLY,
+  type SpecialMed,
+  type SpecialMode,
+} from '@/lib/types';
 
 type Draft = {
   name: string;
-  dose: string;
+  doseQty: string;
+  doseUnit: string;
   form: FormKey;
   method: string;
   note: string;
   mode: SpecialMode;
-  intervalHours: number;
-  hour: number;
-  minute: number;
+  onceDate: string;
+  times: string[];
+  dates: string[];
+  weeklyTarget: string;
+  weeklyStepDays: string;
 };
 
 function formKeyOf(form: string): FormKey {
@@ -40,12 +57,12 @@ function formKeyOf(form: string): FormKey {
   return entry ?? 'tablet';
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
+function addHours(time: string, hours: number): string {
+  const parsed = parseTimeText(time) ?? { hour: 8, minute: 0 };
+  return `${pad2((parsed.hour + hours) % 24)}:${pad2(parsed.minute)}`;
 }
 
 export default function SpecialFormScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { color } = useTheme();
 
@@ -62,128 +79,114 @@ export default function SpecialFormScreen() {
     if (editing) {
       return {
         name: editing.name,
-        dose: editing.dose,
+        doseQty: editing.doseQty,
+        doseUnit: editing.doseUnit,
         form: formKeyOf(editing.form),
         method: editing.method,
         note: editing.note,
         mode: editing.mode,
-        intervalHours: editing.intervalHours,
-        hour: editing.hour,
-        minute: editing.minute,
+        onceDate: editing.onceDate || todayKey(),
+        times: editing.times.length > 0 ? editing.times : ['10:00'],
+        dates: editing.dates,
+        weeklyTarget: String(editing.weeklyTarget),
+        weeklyStepDays: String(editing.weeklyStepDays),
       };
     }
     return {
       name: '',
-      dose: '',
+      doseQty: '1',
+      doseUnit: DEFAULT_UNIT,
       form: 'tablet',
       method: '口服',
       note: '',
-      mode: SPECIAL_MODE_INTERVAL,
-      intervalHours: 8,
-      hour: 21,
-      minute: 0,
+      mode: SPECIAL_MODE_ONCE,
+      onceDate: todayKey(),
+      times: ['10:00'],
+      dates: [],
+      weeklyTarget: '3',
+      weeklyStepDays: '2',
     };
   });
 
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [formTouched, setFormTouched] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const patch = useCallback((p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p })), []);
 
-  const [formTouched, setFormTouched] = useState(false);
-  const autoForm = useCallback(() => {
-    if (formTouched) return;
-    const key = formKeyOf(inferForm(draft.name, draft.dose, draft.method));
-    if (key !== draft.form) patch({ form: key });
-  }, [draft.name, draft.dose, draft.method, draft.form, formTouched, patch]);
-
   React.useEffect(() => {
-    autoForm();
-  }, [autoForm]);
+    if (formTouched) return;
+    const inferred = inferForm(draft.name, `${draft.doseQty}${draft.doseUnit}`, draft.method);
+    const key = formKeyOf(inferred);
+    if (key !== draft.form) patch({ form: key });
+  }, [draft.name, draft.doseQty, draft.doseUnit, draft.method, draft.form, formTouched, patch]);
 
-  // 下次提醒预览
-  const previewText = useMemo(() => {
-    const probe: SpecialMed = {
-      id: 'preview',
-      code: 0,
-      name: draft.name,
-      dose: draft.dose,
-      method: draft.method,
-      form: FORM_LABELS[draft.form],
-      note: draft.note,
-      enabled: true,
-      mode: draft.mode,
-      intervalHours: draft.intervalHours,
-      hour: draft.hour,
-      minute: draft.minute,
-      nextAt: 0,
-      lastAt: 0,
-      snoozeUntil: 0,
-    };
-    const from = draft.mode === SPECIAL_MODE_INTERVAL && editing?.lastAt ? editing.lastAt : Date.now();
-    const next = computeNext(probe, from);
-    return `下一次提醒：${formatMonthDay(next)} ${formatTime(next)}`;
-  }, [draft, editing]);
+  const setTimeAt = (index: number, hour: number, minute: number) => {
+    const next = draft.times.slice();
+    next[index] = `${pad2(hour)}:${pad2(minute)}`;
+    patch({ times: next });
+  };
+
+  const removeTimeAt = (index: number) => {
+    if (draft.times.length <= 1) return;
+    const next = draft.times.slice();
+    next.splice(index, 1);
+    patch({ times: next });
+  };
 
   const save = useCallback(() => {
     const name = draft.name.trim();
-    const dose = draft.dose.trim();
     if (!name) {
-      Alert.alert('提示', '请填写药名');
+      Alert.alert('提示', '请填写名称');
       return;
     }
-    if (!dose) {
+    if (!draft.doseQty.trim()) {
       Alert.alert('提示', '请填写每次用量');
       return;
     }
+    if (draft.mode === SPECIAL_MODE_DATES && draft.dates.length === 0) {
+      Alert.alert('提示', '请选择日期');
+      return;
+    }
 
-    const changed =
-      isNew ||
-      !editing ||
-      editing.mode !== draft.mode ||
-      editing.intervalHours !== draft.intervalHours ||
-      editing.hour !== draft.hour ||
-      editing.minute !== draft.minute;
+    const weeklyTarget = Math.max(1, Math.min(14, Number(draft.weeklyTarget) || 3));
+    const weeklyStepDays = Math.max(1, Math.min(14, Number(draft.weeklyStepDays) || 2));
 
-    const probe: SpecialMed = {
-      id: editing?.id ?? '',
+    const base: SpecialMed = {
+      id: editing?.id ?? genId(),
       code: editing?.code ?? 0,
       name,
-      dose,
+      doseQty: draft.doseQty.trim(),
+      doseUnit: draft.doseUnit,
       method: draft.method,
       form: FORM_LABELS[draft.form],
       note: draft.note.trim(),
       enabled: editing?.enabled ?? true,
       mode: draft.mode,
-      intervalHours: draft.intervalHours,
-      hour: draft.hour,
-      minute: draft.minute,
-      nextAt: editing?.nextAt ?? 0,
+      onceDate: draft.mode === SPECIAL_MODE_ONCE ? draft.onceDate : '',
+      times:
+        draft.mode === SPECIAL_MODE_WEEKLY
+          ? editing && editing.times.length > 0
+            ? editing.times
+            : ['09:00']
+          : draft.times,
+      dates: draft.mode === SPECIAL_MODE_DATES ? draft.dates : [],
+      weeklyTarget,
+      weeklyStepDays,
+      records: editing?.records ?? [],
+      nextAt: 0,
       lastAt: editing?.lastAt ?? 0,
-      snoozeUntil: editing?.snoozeUntil ?? 0,
+      snoozeUntil: 0,
     };
+    base.nextAt = computeNext(base, Date.now());
 
-    if (changed) {
-      const from = isNew
-        ? Date.now()
-        : draft.mode === SPECIAL_MODE_INTERVAL && probe.lastAt > 0
-          ? probe.lastAt
-          : Date.now();
-      probe.nextAt = computeNext(probe, from);
-      probe.snoozeUntil = 0;
-    }
-
-    if (isNew) {
-      addSpecial({ ...probe, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
-    } else {
-      updateSpecial(probe);
-    }
+    if (isNew) addSpecial(base);
+    else updateSpecial(base);
 
     (async () => {
       await syncAll(buildSchedulerInput());
       goBack();
     })();
-  }, [draft, editing, isNew, addSpecial, updateSpecial, router]);
+  }, [draft, editing, isNew, addSpecial, updateSpecial]);
 
   const doDelete = useCallback(async () => {
     if (!editing) return;
@@ -191,7 +194,13 @@ export default function SpecialFormScreen() {
     setConfirmDelete(false);
     await syncAll(buildSchedulerInput());
     goBack();
-  }, [editing, removeSpecial, router]);
+  }, [editing, removeSpecial]);
+
+  const formOptions = FORMS_ORDER.map((k) => ({ value: k, label: FORM_LABELS[k] }));
+  const nextPreview = useMemo(() => {
+    if (!editing) return '';
+    return editing.nextAt > 0 ? `下次 ${formatMonthDay(editing.nextAt)} ${formatTime(editing.nextAt)}` : '';
+  }, [editing]);
 
   return (
     <View className="flex-1 bg-bg dark:bg-bg-d" style={{ paddingTop: insets.top }}>
@@ -202,7 +211,6 @@ export default function SpecialFormScreen() {
       >
         <PageHeader
           title={isNew ? '添加特殊用药' : '编辑特殊用药'}
-          subtitle="特殊用药有独立的提醒节奏，不计入普通药物的今日次数。"
           action={
             <HeaderIconButton accessibilityLabel="返回" onPress={() => goBack()}>
               <Icon name="close" size={20} color={color('muted')} />
@@ -210,132 +218,210 @@ export default function SpecialFormScreen() {
           }
         />
 
-        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">药名</TextMuted>
-        <Field
-          value={draft.name}
-          onChangeText={(v) => patch({ name: v })}
-          placeholder="例如：某特殊药"
-        />
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">名称</TextMuted>
+        <Field value={draft.name} onChangeText={(v) => patch({ name: v })} placeholder="名称" />
 
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">每次用量</TextMuted>
-        <Field
-          value={draft.dose}
-          onChangeText={(v) => patch({ dose: v })}
-          placeholder="例如：1片 / 5ml"
-        />
+        <View className="flex-row items-center gap-2">
+          <NumericInput
+            value={draft.doseQty}
+            onChangeText={(v) => patch({ doseQty: v })}
+            placeholder="数量"
+            accessibilityLabel="数量"
+            className="w-[76px] rounded-[14px] border border-line bg-field px-3 py-3 text-center text-[15px] text-ink dark:border-line-d dark:bg-field-d dark:text-ink-d"
+          />
+          <View className="w-[92px]">
+            <SelectField
+              value={draft.doseUnit}
+              options={UNITS.map((u) => ({ value: u, label: u }))}
+              onChange={(unit) => patch({ doseUnit: unit })}
+            />
+          </View>
+        </View>
 
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">剂型</TextMuted>
-        <FormPicker
+        <SelectField
           value={draft.form}
+          options={formOptions}
           onChange={(f) => {
             setFormTouched(true);
-            patch({ form: f });
+            patch({ form: f as FormKey });
           }}
         />
 
         <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">服用方式</TextMuted>
-        <View className="flex-row flex-wrap gap-1.5">
-          {METHODS.map((m) => (
-            <Chip
-              key={m}
-              label={m}
-              selected={draft.method === m}
-              onPress={() => patch({ method: m })}
-            />
-          ))}
-        </View>
+        <SelectField
+          value={draft.method}
+          options={METHODS.map((m) => ({ value: m, label: m }))}
+          onChange={(method) => patch({ method })}
+        />
 
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">服用节奏</TextMuted>
-        <View className="flex-row flex-wrap gap-1.5">
-          <Chip
-            label="按间隔"
-            selected={draft.mode === SPECIAL_MODE_INTERVAL}
-            onPress={() => patch({ mode: SPECIAL_MODE_INTERVAL })}
+        <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">使用频率</TextMuted>
+        <View className="rounded-2xl border border-line bg-field p-3.5 dark:border-line-d dark:bg-field-d">
+          <SelectField
+            value={draft.mode}
+            options={[
+              { value: SPECIAL_MODE_ONCE, label: '一次性（单日内多次）' },
+              { value: SPECIAL_MODE_WEEKLY, label: '每周 N 次' },
+              { value: SPECIAL_MODE_DATES, label: '指定日期' },
+            ]}
+            onChange={(m) => patch({ mode: m as SpecialMode })}
           />
-          <Chip
-            label="每天固定时间"
-            selected={draft.mode === SPECIAL_MODE_DAILY}
-            onPress={() => patch({ mode: SPECIAL_MODE_DAILY })}
-          />
-        </View>
 
-        {draft.mode === SPECIAL_MODE_INTERVAL ? (
-          <View className="mt-2 rounded-2xl border border-line bg-card p-3.5 dark:border-line-d dark:bg-card-d">
-            <View className="flex-row flex-wrap items-center">
-              <View className="flex-1 pr-2">
-                <Medium className="text-[13.5px]">每隔多久提醒</Medium>
-                <TextMuted className="mt-0.5 text-[11px]">从上一次实际服用时间开始计算</TextMuted>
+          {draft.mode === SPECIAL_MODE_ONCE ? (
+            <>
+              <View className="mt-3 flex-row items-center justify-between">
+                <Text className="text-[12.5px] text-muted dark:text-muted-d">日期</Text>
+                <DateField value={draft.onceDate} onChange={(onceDate) => patch({ onceDate })} />
               </View>
-              <View className="flex-row items-center">
-                <Pressable
-                  onPress={() => patch({ intervalHours: Math.max(1, draft.intervalHours - 1) })}
-                  className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-                >
-                  <Text className="text-[18px] text-violet dark:text-violet-d">−</Text>
-                </Pressable>
-                <View className="min-w-[62px] items-center">
-                  <Text className="text-[14px] font-bold text-violet dark:text-violet-d">
-                    {draft.intervalHours} 小时
+              <Text className="mb-1.5 mt-3 text-[12.5px] font-medium text-muted dark:text-muted-d">
+                当日时刻
+              </Text>
+              {draft.times.map((t, index) => {
+                const parsed = parseTimeText(t) ?? { hour: 10, minute: 0 };
+                return (
+                  <View
+                    key={`${index}-${t}`}
+                    className="mt-1.5 flex-row items-center gap-2 rounded-[13px] border border-line bg-card p-2.5 dark:border-line-d dark:bg-card-d"
+                  >
+                    <TimeField
+                      hour={parsed.hour}
+                      minute={parsed.minute}
+                      onChange={(h, m) => setTimeAt(index, h, m)}
+                    />
+                    <View className="flex-1" />
+                    <Pressable
+                      onPress={() => removeTimeAt(index)}
+                      accessibilityLabel="删除时刻"
+                      className="h-8 w-8 items-center justify-center rounded-[9px] bg-field active:opacity-70 dark:bg-field-d"
+                    >
+                      <Icon name="trash" size={15} color={color('muted')} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+              <Pressable
+                onPress={() =>
+                  patch({ times: [...draft.times, addHours(draft.times[draft.times.length - 1] ?? '10:00', 6)] })
+                }
+                className="mt-2 flex-row items-center gap-1 self-start rounded-full bg-card px-2.5 py-1.5 active:opacity-70 dark:bg-card-d"
+              >
+                <Icon name="add" size={13} color={color('muted')} />
+                <Text className="text-[11.5px] text-muted dark:text-muted-d">添加</Text>
+              </Pressable>
+            </>
+          ) : null}
+
+          {draft.mode === SPECIAL_MODE_WEEKLY ? (
+            <>
+              <View className="mt-3 flex-row items-center justify-between">
+                <Text className="text-[12.5px] text-muted dark:text-muted-d">每周目标次数</Text>
+                <NumericInput
+                  value={draft.weeklyTarget}
+                  onChangeText={(v) => patch({ weeklyTarget: v })}
+                  accessibilityLabel="每周目标次数"
+                  className="w-[64px] rounded-[10px] border border-line bg-card px-2 py-2 text-center text-[13px] text-ink dark:border-line-d dark:bg-card-d dark:text-ink-d"
+                />
+              </View>
+              <View className="mt-3 flex-row items-center justify-between">
+                <Text className="text-[12.5px] text-muted dark:text-muted-d">提醒间隔</Text>
+                <View className="flex-row items-center gap-1.5">
+                  <NumericInput
+                    value={draft.weeklyStepDays}
+                    onChangeText={(v) => patch({ weeklyStepDays: v })}
+                    accessibilityLabel="提醒间隔天数"
+                    className="w-[64px] rounded-[10px] border border-line bg-card px-2 py-2 text-center text-[13px] text-ink dark:border-line-d dark:bg-card-d dark:text-ink-d"
+                  />
+                  <Text className="text-[12px] text-muted dark:text-muted-d">天</Text>
+                </View>
+              </View>
+            </>
+          ) : null}
+
+          {draft.mode === SPECIAL_MODE_DATES ? (
+            <>
+              <Text className="mb-1.5 mt-3 text-[12.5px] font-medium text-muted dark:text-muted-d">
+                日期
+              </Text>
+              <View className="flex-row flex-wrap gap-1.5">
+                {draft.dates.map((d) => (
+                  <Chip
+                    key={d}
+                    label={dateKeyToCn(d)}
+                    selected
+                    onPress={() => patch({ dates: draft.dates.filter((x) => x !== d) })}
+                  />
+                ))}
+              </View>
+              <View className="mt-2 flex-row items-center gap-2">
+                <DateField
+                  value=""
+                  placeholder="选择日期"
+                  onChange={(d) => {
+                    if (!draft.dates.includes(d)) patch({ dates: [...draft.dates, d].sort() });
+                  }}
+                />
+              </View>
+              <Text className="mb-1.5 mt-3 text-[12.5px] font-medium text-muted dark:text-muted-d">
+                时刻
+              </Text>
+              {draft.times.map((t, index) => {
+                const parsed = parseTimeText(t) ?? { hour: 10, minute: 0 };
+                return (
+                  <View
+                    key={`${index}-${t}`}
+                    className="mt-1.5 flex-row items-center gap-2 rounded-[13px] border border-line bg-card p-2.5 dark:border-line-d dark:bg-card-d"
+                  >
+                    <TimeField
+                      hour={parsed.hour}
+                      minute={parsed.minute}
+                      onChange={(h, m) => setTimeAt(index, h, m)}
+                    />
+                    <View className="flex-1" />
+                    <Pressable
+                      onPress={() => removeTimeAt(index)}
+                      accessibilityLabel="删除时刻"
+                      className="h-8 w-8 items-center justify-center rounded-[9px] bg-field active:opacity-70 dark:bg-field-d"
+                    >
+                      <Icon name="trash" size={15} color={color('muted')} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+              <Pressable
+                onPress={() =>
+                  patch({ times: [...draft.times, addHours(draft.times[draft.times.length - 1] ?? '10:00', 6)] })
+                }
+                className="mt-2 flex-row items-center gap-1 self-start rounded-full bg-card px-2.5 py-1.5 active:opacity-70 dark:bg-card-d"
+              >
+                <Icon name="add" size={13} color={color('muted')} />
+                <Text className="text-[11.5px] text-muted dark:text-muted-d">添加</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+
+        {editing && editing.records.length > 0 ? (
+          <>
+            <TextMuted className="mb-1.5 mt-4 text-[12.5px] font-medium">记录列表</TextMuted>
+            <View className="rounded-2xl border border-line bg-card p-3.5 dark:border-line-d dark:bg-card-d">
+              {editing.records.slice(-3).reverse().map((r) => (
+                <View key={r.key} className="mt-1.5 first:mt-0">
+                  <Text className="text-[12.5px] text-ink dark:text-ink-d">
+                    {formatMonthDay(r.due)} {formatTime(r.due)} ·{' '}
+                    {r.status === DOSE_TAKEN ? '已使用' : r.status === DOSE_SKIPPED ? '已跳过' : '待处理'}
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => patch({ intervalHours: Math.min(72, draft.intervalHours + 1) })}
-                  className="h-9 w-9 items-center justify-center rounded-full bg-field active:opacity-70 dark:bg-field-d"
-                >
-                  <Text className="text-[18px] text-violet dark:text-violet-d">+</Text>
-                </Pressable>
-              </View>
+              ))}
+              {nextPreview ? (
+                <Text className="mt-2 text-[11.5px] text-muted dark:text-muted-d">{nextPreview}</Text>
+              ) : null}
             </View>
-          </View>
-        ) : (
-          <Pressable
-            onPress={() => setShowTimePicker(true)}
-            className="mt-2 flex-row items-center rounded-2xl border border-line bg-card p-3.5 active:opacity-80 dark:border-line-d dark:bg-card-d"
-          >
-            <View className="flex-1">
-              <Medium className="text-[13.5px]">每天提醒时间</Medium>
-              <TextMuted className="mt-0.5 text-[11px]">每天这个时间提醒一次</TextMuted>
-            </View>
-            <Text className="text-[15px] font-bold text-violet dark:text-violet-d">
-              {pad2(draft.hour)}:{pad2(draft.minute)}
-            </Text>
-            <Text className="ml-1 text-[12px] font-medium text-primary dark:text-primary-d">修改</Text>
-          </Pressable>
-        )}
+          </>
+        ) : null}
 
-        {/* 预览 */}
-        <View className="mt-2.5 rounded-[14px] bg-violet-bg p-3.5 dark:bg-violet-bg-d">
-          <Text className="text-[12px] font-medium text-violet-text dark:text-violet-text-d">
-            {previewText}
-          </Text>
-          <Text className="mt-1 text-[11px] text-violet-text/80 dark:text-violet-text-d/80">
-            节奏：{scheduleText({
-              id: 'p',
-              code: 0,
-              name: '',
-              dose: '',
-              method: '',
-              form: '',
-              note: '',
-              enabled: true,
-              mode: draft.mode,
-              intervalHours: draft.intervalHours,
-              hour: draft.hour,
-              minute: draft.minute,
-              nextAt: 0,
-              lastAt: 0,
-              snoozeUntil: 0,
-            })}
-          </Text>
-        </View>
-
-        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">备注（可选）</TextMuted>
-        <Field
-          value={draft.note}
-          onChangeText={(v) => patch({ note: v })}
-          placeholder="例如：睡前服用 / 不要和某药同服"
-          multiline
-        />
+        <TextMuted className="mb-1.5 mt-3.5 text-[12.5px] font-medium">备注</TextMuted>
+        <Field value={draft.note} onChangeText={(v) => patch({ note: v })} placeholder="备注" multiline />
 
         <View className="mt-5 flex-row items-center gap-2">
           {!isNew && (
@@ -357,20 +443,6 @@ export default function SpecialFormScreen() {
 
         <View style={{ height: insets.bottom + 16 }} />
       </ScrollView>
-
-      {showTimePicker && (
-        <DateTimePicker
-          value={new Date(2026, 0, 1, draft.hour, draft.minute)}
-          mode="time"
-          is24Hour
-          onChange={(event, date) => {
-            setShowTimePicker(false);
-            if (event.type === 'set' && date) {
-              patch({ hour: date.getHours(), minute: date.getMinutes() });
-            }
-          }}
-        />
-      )}
 
       <ConfirmDialog
         visible={confirmDelete}

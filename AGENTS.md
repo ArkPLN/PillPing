@@ -47,15 +47,24 @@ Run `yarn typecheck` and `yarn test` before declaring any task done.
 - Expo Go bundles only its own native modules. This app uses exact-alarm notifications, so **a development build is required**: `npx expo run:android`, or `eas build --profile development`.
 - Do not add a library without checking that it works on Android and that an Expo-recommended module doesn't already cover it.
 
-## Data model invariants
+## Data model invariants（v3）
 
-Field names in `src/lib/types.ts` match the legacy JSON keys exactly (`slotMask`, `actedAt`, `snoozeUntil`, `courseDays`, `followupDays`, `nextFollowupAt`, `code`). Keep them aligned if you add fields.
+每药独立计划，旧版「字段名与 legacy JSON 对齐」约束已废止：
 
-The chain-scheduling rule is the core behavior:
+- `Med.plan` 是唯一计划来源，支持 `daily` / `weekly` / `interval` 三种类型；槽位用稳定 `id`，剂量记录身份为 `(medId, slotKey, dateKey)`。
+- `DoseRecord` 持久化每次剂量的状态、实际时刻、推迟目标与计划时刻；计划时刻本身仍由 `src/lib/plan.ts` 派生，不作为独立真相持久化。
+- 全局 `Cycle`、`interval`、`doseCount`、`slotMask` 已移除；存储版本为 3，旧数据不迁移（加载时重置并提示）。
 
-> next dose time = most recent **actual** intake time + interval
+链式规则仅适用于 **interval 型计划**，且按药隔离：
 
-Not "first dose + N × interval". `src/lib/__tests__/cycle.test.ts` pins this with the three examples from the legacy README. Do not change `projectPendingFromLastTaken` / `rescheduleAfterTaken` without updating those tests.
+> 该药下一次 = 该药最近一次**实际**服用时间 + 间隔
+
+`src/lib/__tests__/plan.test.ts` 用三个 legacy 示例钉住该行为。修改 `src/lib/plan.ts` 的 interval 分支时必须同步更新这些测试。
+
+## 表单控件（KISS）
+
+- 固定枚举用 `@react-native-picker/picker` 的下拉；数值用默认键盘的 `TextInput`（支持「半」「1.5」）；时刻/日期用 `@react-native-community/datetimepicker`；星期用自定义多选。
+- 表单页不写解释性小字；仅在语义无法自明时保留一句。
 
 ## Reference
 

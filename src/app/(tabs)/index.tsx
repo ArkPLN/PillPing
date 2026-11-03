@@ -1,119 +1,102 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { DoseCard, HistoryList, MedsShortcut, PlanPlaceholder, SectionHeader } from '@/components/home/HomeCards';
-import { HomeHeader } from '@/components/home/Header';
-import { ActiveHero, DoneHero, StartHero } from '@/components/home/Hero';
-import { PrimaryButton } from '@/components/ui/Button';
-import { Bold, TextMuted } from '@/components/ui/Text';
-import { allResolved, isStarted, nextPending } from '@/lib/cycle';
-import { shouldStartNewDay } from '@/lib/day';
-import { useNow } from '@/lib/useNow';
-import { activeMedCount } from '@/lib/med';
-import { buildSchedulerInput } from '@/lib/notifications/input';
-import { syncAll } from '@/lib/notifications/scheduler';
-import { useStore } from '@/store/useStore';
 import { useRouter } from 'expo-router';
 
+import { HistoryList, MedsShortcut, SectionHeader } from '@/components/home/HomeCards';
+import { HomeHeader } from '@/components/home/Header';
+import { TimelineCard, TimelineProgress } from '@/components/home/TimelineCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { TextMuted } from '@/components/ui/Text';
+import { isCourseActive } from '@/lib/med';
+import { todayKey } from '@/lib/format';
+import { aggregateDay } from '@/lib/timeline';
 import { useHomeActions } from '@/lib/useHomeActions';
+import { useNow } from '@/lib/useNow';
+import { buildHistory, useStore } from '@/store/useStore';
 
-/**
- * 今日页。对应 legacy MainActivity.buildHome()。
- */
-export default function HomeScreen() {
-  const router = useRouter();
-  const now = useNow(1000);
+export default function TodayScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
-  const store = useStore();
-  const { cycle, meds, interval, doseCount, remindersEnabled, useStreak, history } = store;
+  const meds = useStore((s) => s.meds);
+  const records = useStore((s) => s.records);
+  const remindersEnabled = useStore((s) => s.remindersEnabled);
+  const useStreak = useStore((s) => s.useStreak);
 
-  const actions = useHomeActions();
+  const dayKey = todayKey();
+  const now = useNow(30_000);
+  const agg = useMemo(() => aggregateDay(meds, records, dayKey, now), [meds, records, dayKey, now]);
+  const history = useMemo(() => buildHistory(meds, records), [meds, records]);
+  const { openDose } = useHomeActions();
 
-  const start = useMemo(() => shouldStartNewDay(cycle, now), [cycle, now]);
-  const done = !!cycle && isStarted(cycle) && allResolved(cycle);
-  const planCount = start ? doseCount : cycle && isStarted(cycle) ? cycle.count : doseCount;
+  const activeCount = meds.filter((m) => m.enabled && isCourseActive(m, now)).length;
+  const nextIndex = agg.entries.findIndex((e) => e.status === 'pending' || e.status === 'missed');
 
   return (
-    <ScrollView
-      className="flex-1 bg-bg dark:bg-bg-d"
-      contentContainerClassName="px-5 pb-7"
-      contentContainerStyle={{ paddingTop: insets.top }}
-      showsVerticalScrollIndicator={false}
-    >
-      <HomeHeader
-        useStreak={useStreak}
-        remindersEnabled={remindersEnabled}
-        onSettings={() => router.push('/settings')}
-      />
+    <View className="flex-1 bg-bg dark:bg-bg-d" style={{ paddingTop: insets.top }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerClassName="px-5 pb-7"
+        showsVerticalScrollIndicator={false}
+      >
+        <HomeHeader
+          useStreak={useStreak}
+          remindersEnabled={remindersEnabled}
+          onSettings={() => router.push('/settings')}
+        />
 
-      <View className="mt-3.5">
-        {start ? (
-          <StartHero
-            interval={interval}
-            doseCount={doseCount}
-            firstAt={actions.firstAt}
-            medCount={meds.length}
-            previous={cycle}
-            onPickTime={actions.pickFirstTime}
-            onStart={actions.startCycle}
-            onGoMeds={() => router.push('/meds')}
-          />
-        ) : done ? (
-          <DoneHero cycle={cycle!} />
+        {agg.total > 0 ? (
+          <TimelineProgress taken={agg.taken} total={agg.total} />
         ) : (
-          <ActiveHero
-            cycle={cycle!}
-            meds={meds}
-            now={now}
-            onTake={actions.markNextTaken}
-            onSnooze={actions.snoozeNext}
-            onBackfill={actions.backfillNext}
-            onGoMeds={() => router.push('/meds')}
+          <EmptyState
+            icon="pill"
+            title="今天没有服药计划"
+            desc={
+              meds.length === 0
+                ? '添加药物并设置服药时间后，这里会显示今天的安排。'
+                : '今天没有安排；可以在药物页调整计划。'
+            }
+            buttonLabel={meds.length === 0 ? '添加药物' : '管理药物'}
+            buttonTone="primary"
+            onAdd={() => router.push('/meds')}
           />
         )}
-      </View>
 
-      <View className="mt-6">
-        <SectionHeader title="今天的服药计划" trailing={`${planCount} 次 · ${interval} 小时`} />
-      </View>
+        {agg.total > 0 ? (
+          <>
+            <SectionHeader title="今天的服药" trailing={`${agg.taken}/${agg.total} 已服`} />
+            {agg.entries.map((entry, index) => (
+              <TimelineCard
+                key={`${entry.medId}-${entry.slotKey}-${entry.dateKey}`}
+                entry={entry}
+                now={now}
+                isNext={index === nextIndex}
+                onPress={() => openDose(entry)}
+              />
+            ))}
+          </>
+        ) : null}
 
-      {start ? (
-        <PlanPlaceholder doseCount={doseCount} interval={interval} />
-      ) : (
-        <View className="gap-2.5">
-          {Array.from({ length: planCount }).map((_, i) => (
-            <DoseCard
-              key={i}
-              cycle={cycle!}
-              index={i}
-              meds={meds}
-              now={now}
-              onPress={() => actions.openDose(i)}
-            />
-          ))}
-        </View>
-      )}
-
-      <View className="mt-4">
         <MedsShortcut
           total={meds.length}
-          active={activeMedCount(meds, now)}
+          active={activeCount}
           onPress={() => router.push('/meds')}
         />
-      </View>
 
-      {history.length > 0 && (
-        <View className="mt-6.5">
-          <SectionHeader title="最近记录" trailing={null} />
-          <HistoryList history={history} />
-        </View>
-      )}
+        {history.length > 0 ? (
+          <>
+            <SectionHeader title="最近记录" />
+            <HistoryList history={history} />
+          </>
+        ) : null}
 
-      <Text className="mt-6.5 text-center text-[11px] leading-[15px] text-muted-light dark:text-muted-light-d">
-        本应用仅用于服药时间提醒，不提供医疗建议。{'\n'}具体用药请遵医嘱。
-      </Text>
-    </ScrollView>
+        <TextMuted className="mt-4 text-[11px] leading-[16px]">
+          本应用仅作服药提醒，不构成医疗建议；用药请遵医嘱。
+        </TextMuted>
+
+        <View style={{ height: insets.bottom + 16 }} />
+      </ScrollView>
+    </View>
   );
 }

@@ -2,120 +2,146 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import {
-  allResolved,
-  clampCount,
-  createCycle,
-  isStarted,
-  projectPendingFromLastTaken,
-  resizeCycle,
-  rescheduleAfterTaken,
-} from '@/lib/cycle';
-import { isCourseActive } from '@/lib/med';
 import { repairState } from '@/lib/repair';
-import { computeNext, computeNextAfterTaken } from '@/lib/specialmed';
+import { computeNext, computeNextAfterTaken, recordKeyFor } from '@/lib/specialmed';
+import { aggregateDay } from '@/lib/timeline';
+import { dayStartOf, timeAt } from '@/lib/plan';
 import { dateKey } from '@/lib/format';
+import { clampAt } from '@/utils/timestamp';
+import { MINUTE_MS } from '@/constants/time';
+import { genId } from '@/utils/id';
 import {
   DOSE_PENDING,
   DOSE_SKIPPED,
   DOSE_TAKEN,
-  type Cycle,
+  type DoseRecord,
   type HistoryItem,
   type Med,
+  type SavedPlan,
+  type SchedulePlan,
   type SpecialMed,
 } from '@/lib/types';
 
-/** 对应 legacy Store 的 SharedPreferences 名称。 */
+/** 存储 key（沿用旧名称，结构版本由 persist version 控制）。 */
 const STORAGE_NAME = 'medtimer_data';
-const HISTORY_LIMIT = 40;
+const HISTORY_DAYS = 3;
 
 export type AppState = {
   meds: Med[];
-  cycle: Cycle | null;
-  history: HistoryItem[];
+  records: DoseRecord[];
   specials: SpecialMed[];
-  interval: number;
-  doseCount: number;
+  templates: SavedPlan[];
   remindersEnabled: boolean;
   onboarded: boolean;
   lastUseDay: string | null;
   useStreak: number;
+  /** 旧版本数据被重置时置 true，由启动层消费后清除；不持久化。 */
+  storageResetNotice: boolean;
 };
 
 type Actions = {
-  // 设置
-  setInterval: (hours: number) => void;
-  setDoseCount: (count: number) => void;
   setRemindersEnabled: (v: boolean) => void;
   setOnboarded: (v: boolean) => void;
 
-  // 药物
   addMed: (med: Med) => void;
   updateMed: (med: Med) => void;
   removeMed: (id: string) => void;
   toggleMedEnabled: (id: string) => void;
 
-  // 周期
-  startCycle: (firstAt: number, intervalHours: number, count: number) => void;
-  markTaken: (index: number) => void;
-  markTakenAt: (index: number, atMillis: number) => void;
-  skip: (index: number) => void;
-  undo: (index: number) => void;
-  snooze: (index: number, minutes: number) => void;
-  clearToday: () => void;
+  markTaken: (medId: string, slotKey: string, dateKey: string) => void;
+  markTakenAt: (medId: string, slotKey: string, dateKey: string, atMillis: number) => void;
+  skip: (medId: string, slotKey: string, dateKey: string) => void;
+  undo: (medId: string, slotKey: string, dateKey: string) => void;
+  snooze: (medId: string, slotKey: string, dateKey: string, minutes: number) => void;
 
-  // 特殊用药
   addSpecial: (med: SpecialMed) => void;
   updateSpecial: (med: SpecialMed) => void;
   removeSpecial: (id: string) => void;
   toggleSpecialEnabled: (id: string) => void;
-  markSpecialTaken: (id: string, atMillis?: number) => void;
-  snoozeSpecial: (id: string, minutes: number) => void;
+  markSpecialTaken: (id: string, recordKey: string, atMillis?: number) => void;
+  snoozeSpecial: (id: string, recordKey: string, minutes: number) => void;
   nextSpecialCode: () => number;
 
-  // 复诊
+  saveTemplate: (name: string, plan: SchedulePlan) => void;
+  removeTemplate: (id: string) => void;
+
   setFollowup: (medId: string, nextFollowupAt: number) => void;
 
-  // 维护
   touchDailyUse: () => number;
+  clearToday: () => void;
+  consumeStorageResetNotice: () => void;
   clearAll: () => void;
 };
 
-const initialState: AppState = {
+export const initialState: AppState = {
   meds: [],
-  cycle: null,
-  history: [],
+  records: [],
   specials: [],
-  interval: 5,
-  doseCount: 3,
+  templates: [],
   remindersEnabled: true,
   onboarded: false,
   lastUseDay: null,
   useStreak: 1,
+  storageResetNotice: false,
 };
 
-/** 收集所有药物的名称摘要，用于历史记录。对应 legacy allMedSummary。 */
-function allMedSummary(meds: Med[]): string {
-  const names = meds.filter((m) => m.enabled).map((m) => m.name);
-  return names.length === 0 ? '未配置药物' : names.join('、');
+function plannedAtFor(media: Med | undefined, slotKey: string, dayKey: string): number {
+  if (media) {
+    if (media.plan.type !== 'interval') {
+      const slot = media.plan.slots.find((s) => s.id === slotKey);
+      if (slot) return timeAt(dayKey, slot.hour, slot.minute);
+    } else if (slotKey.startsWith('iv-')) {
+      const n = Number(slotKey.slice(3));
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return dayStartOf(dayKey);
 }
 
-/** 把当前 cycle 归档进历史。对应 legacy archiveCurrent。 */
-function archive(cycle: Cycle | null, meds: Med[], history: HistoryItem[]): HistoryItem[] {
-  if (!cycle || !isStarted(cycle)) return history;
+function upsertRecord(
+  records: DoseRecord[],
+  next: DoseRecord
+): DoseRecord[] {
+  const index = records.findIndex(
+    (r) => r.medId === next.medId && r.slotKey === next.slotKey && r.dateKey === next.dateKey
+  );
+  if (index < 0) return [...records, next];
+  const copy = records.slice();
+  copy[index] = next;
+  return copy;
+}
 
-  let taken = 0;
-  for (let i = 0; i < cycle.count; i++) if (cycle.status[i] === DOSE_TAKEN) taken++;
+function recordFor(
+  state: AppState,
+  medId: string,
+  slotKey: string,
+  dayKey: string
+): DoseRecord | undefined {
+  return state.records.find(
+    (r) => r.medId === medId && r.slotKey === slotKey && r.dateKey === dayKey
+  );
+}
 
-  const item: HistoryItem = {
-    date: cycle.startDate,
-    startAt: cycle.firstAt,
-    taken,
-    total: cycle.count,
-    summary: allMedSummary(meds),
+function withRecord(
+  state: AppState,
+  medId: string,
+  slotKey: string,
+  dayKey: string,
+  patch: Partial<DoseRecord>
+): DoseRecord[] {
+  const med = state.meds.find((m) => m.id === medId);
+  const base = recordFor(state, medId, slotKey, dayKey);
+  const record: DoseRecord = {
+    medId,
+    slotKey,
+    dateKey: dayKey,
+    plannedAt: base?.plannedAt || plannedAtFor(med, slotKey, dayKey),
+    status: base?.status ?? DOSE_PENDING,
+    actedAt: base?.actedAt ?? 0,
+    snoozeUntil: base?.snoozeUntil ?? 0,
+    ...patch,
   };
-  const next = [item, ...history];
-  return next.slice(0, HISTORY_LIMIT);
+  return upsertRecord(state.records, record);
 }
 
 export const useStore = create<AppState & Actions>()(
@@ -124,150 +150,72 @@ export const useStore = create<AppState & Actions>()(
       ...initialState,
 
       // ---------- 设置 ----------
-
-      setInterval: (hours) => {
-        const v = Math.max(1, Math.min(12, hours));
-        if (v === get().interval) return;
-        set((s) => {
-          const cycle =
-            s.cycle && isStarted(s.cycle) ? projectPendingFromLastTaken(s.cycle, v) : s.cycle;
-          return { interval: v, cycle };
-        });
-      },
-
-      setDoseCount: (count) => {
-        const v = clampCount(count);
-        if (v === get().doseCount) return;
-        set((s) => {
-          if (!s.cycle || !isStarted(s.cycle)) return { doseCount: v };
-
-          const oldSize = s.cycle.count;
-          let cycle = resizeCycle(s.cycle, v);
-          if (v > oldSize) cycle = projectPendingFromLastTaken(cycle, s.interval);
-          return { doseCount: v, cycle };
-        });
-      },
-
       setRemindersEnabled: (v) => set({ remindersEnabled: v }),
       setOnboarded: (v) => set({ onboarded: v }),
 
       // ---------- 药物 ----------
-
       addMed: (med) => set((s) => ({ meds: [...s.meds, med] })),
-
-      updateMed: (med) =>
-        set((s) => ({ meds: s.meds.map((m) => (m.id === med.id ? med : m)) })),
-
-      removeMed: (id) => set((s) => ({ meds: s.meds.filter((m) => m.id !== id) })),
-
+      updateMed: (med) => set((s) => ({ meds: s.meds.map((m) => (m.id === med.id ? med : m)) })),
+      removeMed: (id) =>
+        set((s) => ({
+          meds: s.meds.filter((m) => m.id !== id),
+          records: s.records.filter((r) => r.medId !== id),
+        })),
       toggleMedEnabled: (id) =>
         set((s) => ({
           meds: s.meds.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m)),
         })),
 
-      // ---------- 周期 ----------
+      // ---------- 剂量记录 ----------
+      markTaken: (medId, slotKey, dayKey) => get().markTakenAt(medId, slotKey, dayKey, Date.now()),
 
-      startCycle: (firstAt, intervalHours, count) => {
-        const interval = Math.max(1, Math.min(12, intervalHours));
-        const doseCount = clampCount(count);
-        const now = Date.now();
-        let first = firstAt > 0 ? firstAt : now;
-        if (first > now) first = now;
-
-        set((s) => {
-          const history = archive(s.cycle, s.meds, s.history);
-          const cycle = createCycle(doseCount);
-          cycle.firstAt = first;
-          cycle.startDate = dateKey(first);
-          for (let i = 0; i < doseCount; i++) {
-            cycle.planned[i] = first + i * interval * 3600_000;
-            cycle.status[i] = DOSE_PENDING;
-            cycle.snoozeUntil[i] = 0;
-          }
-          // 第一次立即记为已服用（legacy 行为）
-          cycle.status[0] = DOSE_TAKEN;
-          cycle.actedAt[0] = first;
-
-          return { interval, doseCount, cycle, history };
-        });
+      markTakenAt: (medId, slotKey, dayKey, atMillis) => {
+        const at = clampAt(atMillis, Date.now());
+        set((s) => ({
+          records: withRecord(s, medId, slotKey, dayKey, {
+            status: DOSE_TAKEN,
+            actedAt: at,
+            snoozeUntil: 0,
+          }),
+        }));
+        get().touchDailyUse();
       },
 
-      markTaken: (index) => get().markTakenAt(index, Date.now()),
-
-      markTakenAt: (index, atMillis) => {
-        set((s) => {
-          const c = s.cycle;
-          if (!c || index < 0 || index >= c.count) return {};
-
-          const now = Date.now();
-          const at = atMillis > 0 ? Math.min(atMillis, now) : now;
-
-          const status = [...c.status];
-          const actedAt = [...c.actedAt];
-          const snoozeUntil = [...c.snoozeUntil];
-          status[index] = DOSE_TAKEN;
-          actedAt[index] = at;
-          snoozeUntil[index] = 0;
-
-          let cycle: Cycle = { ...c, status, actedAt, snoozeUntil };
-          // 关键：后续所有待服次数都从这次实际服用时间重排
-          cycle = rescheduleAfterTaken(cycle, index, s.interval);
-          return { cycle };
-        });
+      skip: (medId, slotKey, dayKey) => {
+        set((s) => ({
+          records: withRecord(s, medId, slotKey, dayKey, {
+            status: DOSE_SKIPPED,
+            actedAt: Date.now(),
+            snoozeUntil: 0,
+          }),
+        }));
       },
 
-      skip: (index) => {
-        set((s) => {
-          const c = s.cycle;
-          if (!c || index < 0 || index >= c.count) return {};
-          const status = [...c.status];
-          const actedAt = [...c.actedAt];
-          const snoozeUntil = [...c.snoozeUntil];
-          status[index] = DOSE_SKIPPED;
-          actedAt[index] = Date.now();
-          snoozeUntil[index] = 0;
-          // 跳过不重排后续计划（legacy 行为）
-          return { cycle: { ...c, status, actedAt, snoozeUntil } };
-        });
+      undo: (medId, slotKey, dayKey) => {
+        set((s) => ({
+          records: s.records.filter(
+            (r) => !(r.medId === medId && r.slotKey === slotKey && r.dateKey === dayKey)
+          ),
+        }));
       },
 
-      undo: (index) => {
+      snooze: (medId, slotKey, dayKey, minutes) => {
         set((s) => {
-          const c = s.cycle;
-          if (!c || index < 0 || index >= c.count) return {};
-          const status = [...c.status];
-          const actedAt = [...c.actedAt];
-          const snoozeUntil = [...c.snoozeUntil];
-          status[index] = DOSE_PENDING;
-          actedAt[index] = 0;
-          snoozeUntil[index] = 0;
-          const cycle = projectPendingFromLastTaken(
-            { ...c, status, actedAt, snoozeUntil },
-            s.interval
-          );
-          return { cycle };
+          const existing = recordFor(s, medId, slotKey, dayKey);
+          if (existing && existing.status !== DOSE_PENDING) return {};
+          const med = s.meds.find((m) => m.id === medId);
+          const planned = existing?.plannedAt || plannedAtFor(med, slotKey, dayKey);
+          const base = Math.max(Date.now(), planned, existing?.snoozeUntil ?? 0);
+          return {
+            records: withRecord(s, medId, slotKey, dayKey, {
+              status: DOSE_PENDING,
+              snoozeUntil: base + Math.max(1, minutes) * MINUTE_MS,
+            }),
+          };
         });
       },
-
-      snooze: (index, minutes) => {
-        set((s) => {
-          const c = s.cycle;
-          if (!c || index < 0 || index >= c.count) return {};
-          if (c.status[index] !== DOSE_PENDING) return {};
-
-          const now = Date.now();
-          const due = c.snoozeUntil[index] > 0 ? c.snoozeUntil[index] : c.planned[index];
-          const base = Math.max(now, due);
-          const snoozeUntil = [...c.snoozeUntil];
-          snoozeUntil[index] = base + Math.max(1, minutes) * 60_000;
-          return { cycle: { ...c, snoozeUntil } };
-        });
-      },
-
-      clearToday: () => set({ cycle: null }),
 
       // ---------- 特殊用药 ----------
-
       nextSpecialCode: () => {
         const max = get().specials.reduce((acc, m) => Math.max(acc, m.code), -1);
         return Math.min(127, max + 1);
@@ -299,45 +247,64 @@ export const useStore = create<AppState & Actions>()(
           specials: s.specials.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m)),
         })),
 
-      markSpecialTaken: (id, atMillis) => {
+      markSpecialTaken: (id, recordKey, atMillis) => {
         set((s) => {
-          const now = Date.now();
-          const at = atMillis && atMillis > 0 ? Math.min(atMillis, now) : now;
+          const at = clampAt(atMillis ?? 0, Date.now());
           const specials = s.specials.map((m) => {
             if (m.id !== id) return m;
-            return {
+            const due = parseDueFromKey(recordKey) || m.nextAt;
+            const record: import('@/lib/types').SpecialRecord = {
+              key: recordKey || recordKeyFor(due),
+              due,
+              status: DOSE_TAKEN,
+              actedAt: at,
+              snoozeUntil: 0,
+            };
+            const records = [
+              ...m.records.filter((r) => r.key !== record.key),
+              record,
+            ];
+            const updated: SpecialMed = {
               ...m,
+              records,
               lastAt: at,
               snoozeUntil: 0,
-              nextAt: computeNextAfterTaken(m, at),
             };
+            return { ...updated, nextAt: computeNextAfterTaken(updated, at) };
           });
           return { specials };
         });
+        get().touchDailyUse();
       },
 
-      snoozeSpecial: (id, minutes) => {
+      snoozeSpecial: (id, recordKey, minutes) => {
         set((s) => {
           const specials = s.specials.map((m) => {
             if (m.id !== id || !m.enabled) return m;
-            const due = m.snoozeUntil > 0 ? m.snoozeUntil : m.nextAt;
+            const due = parseDueFromKey(recordKey) || m.nextAt;
             const base = Math.max(Date.now(), due);
-            return { ...m, snoozeUntil: base + Math.max(1, minutes) * 60_000 };
+            return { ...m, snoozeUntil: base + Math.max(1, minutes) * MINUTE_MS };
           });
           return { specials };
         });
       },
 
-      // ---------- 复诊 ----------
+      // ---------- 模板 ----------
+      saveTemplate: (name, plan) =>
+        set((s) => ({
+          templates: [...s.templates, { id: genId(), name, plan }],
+        })),
 
+      removeTemplate: (id) =>
+        set((s) => ({ templates: s.templates.filter((t) => t.id !== id) })),
+
+      // ---------- 复诊 ----------
       setFollowup: (medId, nextFollowupAt) =>
         set((s) => ({
           meds: s.meds.map((m) => (m.id === medId ? { ...m, nextFollowupAt } : m)),
         })),
 
       // ---------- 维护 ----------
-
-      /** 记录连续使用天数。对应 legacy touchDailyUse。 */
       touchDailyUse: () => {
         const today = dateKey(Date.now());
         const { lastUseDay, useStreak } = get();
@@ -354,40 +321,91 @@ export const useStore = create<AppState & Actions>()(
         return streak;
       },
 
+      consumeStorageResetNotice: () => set({ storageResetNotice: false }),
+
+      clearToday: () => {
+        const today = dateKey(Date.now());
+        set((s) => ({ records: s.records.filter((r) => r.dateKey !== today) }));
+      },
+
       clearAll: () => set({ ...initialState }),
     }),
     {
-      name: `${STORAGE_NAME}`,
+      name: STORAGE_NAME,
       storage: createJSONStorage(() => AsyncStorage),
-      // 只持久化数据字段，不持久化 action
       partialize: (s): AppState => ({
         meds: s.meds,
-        cycle: s.cycle,
-        history: s.history,
+        records: s.records,
         specials: s.specials,
-        interval: s.interval,
-        doseCount: s.doseCount,
+        templates: s.templates,
         remindersEnabled: s.remindersEnabled,
         onboarded: s.onboarded,
         lastUseDay: s.lastUseDay,
         useStreak: s.useStreak,
+        storageResetNotice: false,
       }),
-      version: 1,
-      // 反序列化后自愈，对应 legacy Store.load() 的修复逻辑
+      version: 3,
+      migrate: (persisted, version) => {
+        if (version < 3) {
+          return { ...initialState, onboarded: true, storageResetNotice: true };
+        }
+        return persisted as AppState;
+      },
       merge: (persisted, current) => {
-        const merged = { ...current, ...(persisted as Partial<AppState>) } as AppState & Actions;
+        const p = (persisted ?? {}) as Partial<AppState>;
+        const merged = {
+          ...current,
+          meds: p.meds ?? current.meds,
+          records: p.records ?? current.records,
+          specials: p.specials ?? current.specials,
+          templates: p.templates ?? current.templates,
+          remindersEnabled: p.remindersEnabled ?? current.remindersEnabled,
+          onboarded: p.onboarded ?? current.onboarded,
+          lastUseDay: p.lastUseDay ?? current.lastUseDay,
+          useStreak: p.useStreak ?? current.useStreak,
+          storageResetNotice: p.storageResetNotice ?? current.storageResetNotice,
+        } as AppState & Actions;
         return { ...merged, ...repairState(merged) };
       },
     }
   )
 );
 
-/** 便捷选择器：当前 cycle 是否已全部完成。 */
-export function selectAllResolved(s: AppState): boolean {
-  return !!s.cycle && allResolved(s.cycle);
+/** 解析特殊用药记录 key（YYYY-MM-DD-HH:mm）中的到点时刻。 */
+export function parseDueFromKey(key: string): number {
+  const m = /^(\d{4}-\d{2}-\d{2})-(\d{2}):(\d{2})$/.exec(key);
+  if (!m) return 0;
+  const [y, mo, d] = m[1].split('-').map(Number);
+  return new Date(y, mo - 1, d, Number(m[2]), Number(m[3]), 0, 0).getTime();
 }
 
-/** 便捷选择器：是否有生效中的普通药物。 */
-export function selectHasActiveMeds(s: AppState, now = Date.now()): boolean {
-  return s.meds.some((m) => m.enabled && isCourseActive(m, now));
+/** 最近 N 天的历史（不含今天），由记录派生。 */
+export function buildHistory(
+  meds: Med[],
+  records: DoseRecord[],
+  days = HISTORY_DAYS
+): HistoryItem[] {
+  const today = dateKey(Date.now());
+  const out: HistoryItem[] = [];
+  for (let i = 1; i <= days; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const key = dateKey(date.getTime());
+    if (key === today) continue;
+    const agg = aggregateDay(meds, records, key, Date.now());
+    if (agg.total === 0) continue;
+    const names = Array.from(new Set(agg.entries.map((e) => e.med.name)));
+    out.push({
+      date: key,
+      taken: agg.taken,
+      total: agg.total,
+      summary: names.length > 0 ? names.join('、') : '未配置药物',
+    });
+  }
+  return out;
+}
+
+/** 便捷选择器：从 state 派生历史。 */
+export function selectHistory(state: AppState, days = HISTORY_DAYS): HistoryItem[] {
+  return buildHistory(state.meds, state.records, days);
 }

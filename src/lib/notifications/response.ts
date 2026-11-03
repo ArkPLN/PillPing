@@ -1,18 +1,14 @@
 /**
  * 通知响应处理。
  *
- * 对应 legacy 的三个 Receiver：
- * - ActionReceiver（普通服药：已服用 / 10 分钟后）
- * - SpecialActionReceiver（特殊用药：已服用 / 10 分钟后）
- * - FollowupActionReceiver（复诊：已复诊 / 明天再提醒）
- *
- * 用 useStore.getState() 直接读改写，保证在后台任务里也能工作，
- * 不依赖 React 渲染上下文。
+ * 普通药按 (medId, slotKey, dateKey) 记录；特殊用药按 (id, recordKey) 记录。
+ * 旧版本通知（仅带 index）会被安全忽略。
  */
 
 import * as Notifications from 'expo-notifications';
 
 import { useStore } from '@/store/useStore';
+import { DAY_MS } from '@/constants/time';
 import type { Med, SpecialMed } from '@/lib/types';
 
 import {
@@ -21,26 +17,40 @@ import {
   ACTION_MARK,
   ACTION_SNOOZE,
 } from './channel';
-import { cancelDose, cancelSpecial, presentNow, syncAll, type SchedulerInput } from './scheduler';
+import { cancelDose, cancelSpecial, presentNow, syncAll } from './scheduler';
 import { buildSchedulerInput } from './input';
 
-type DoseData = { kind: 'dose'; index: number; due: number };
-type SpecialData = { kind: 'special'; id: string; due: number };
+type DoseData = {
+  kind: 'dose';
+  medId: string;
+  slotKey: string;
+  dateKey: string;
+  due?: number;
+};
+type SpecialData = { kind: 'special'; id: string; recordKey: string; due?: number };
 type FollowupData = { kind: 'followup'; medId: string };
 
 function isDose(d: unknown): d is DoseData {
-  return !!d && typeof d === 'object' && (d as DoseData).kind === 'dose';
+  if (!d || typeof d !== 'object') return false;
+  const v = d as DoseData;
+  return (
+    v.kind === 'dose' &&
+    typeof v.medId === 'string' &&
+    typeof v.slotKey === 'string' &&
+    typeof v.dateKey === 'string'
+  );
 }
 function isSpecial(d: unknown): d is SpecialData {
-  return !!d && typeof d === 'object' && (d as SpecialData).kind === 'special';
+  if (!d || typeof d !== 'object') return false;
+  const v = d as SpecialData;
+  return v.kind === 'special' && typeof v.id === 'string' && typeof v.recordKey === 'string';
 }
 function isFollowup(d: unknown): d is FollowupData {
   return !!d && typeof d === 'object' && (d as FollowupData).kind === 'followup';
 }
 
 async function resync(): Promise<void> {
-  const input: SchedulerInput = buildSchedulerInput();
-  await syncAll(input);
+  await syncAll(buildSchedulerInput());
 }
 
 /**
@@ -53,29 +63,28 @@ export async function handleNotificationResponse(
   const actionId = response.actionIdentifier;
   const data = response.notification.request.content.data;
 
-  // 用户直接点击通知本体（非按钮）→ 只交给 UI 导航，不改数据
   if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return false;
 
   const store = useStore.getState();
 
-  // ---------- 普通服药 ----------
+  // ---------- 普通药 ----------
   if (isDose(data)) {
-    const index = data.index;
+    const { medId, slotKey, dateKey } = data;
 
     if (actionId === ACTION_MARK) {
-      store.markTaken(index);
-      await cancelDose(index);
+      store.markTaken(medId, slotKey, dateKey);
+      await cancelDose(medId, slotKey, dateKey);
       await resync();
       return true;
     }
 
     if (actionId === ACTION_SNOOZE) {
-      store.snooze(index, 10);
-      await cancelDose(index);
+      store.snooze(medId, slotKey, dateKey, 10);
+      await cancelDose(medId, slotKey, dateKey);
       await resync();
       await presentNow({
         title: '将在 10 分钟后提醒',
-        body: `第${index + 1}次服药已推迟`,
+        body: '本次服药已推迟',
         category: undefined,
       });
       return true;
@@ -89,15 +98,15 @@ export async function handleNotificationResponse(
     if (!m) return false;
 
     if (actionId === ACTION_MARK) {
-      store.markSpecialTaken(m.id);
-      await cancelSpecial(m.id);
+      store.markSpecialTaken(m.id, data.recordKey);
+      await cancelSpecial(m.id, data.recordKey);
       await resync();
       return true;
     }
 
     if (actionId === ACTION_SNOOZE) {
-      store.snoozeSpecial(m.id, 10);
-      await cancelSpecial(m.id);
+      store.snoozeSpecial(m.id, data.recordKey, 10);
+      await cancelSpecial(m.id, data.recordKey);
       await resync();
       await presentNow({
         title: '将在 10 分钟后提醒',
@@ -115,13 +124,13 @@ export async function handleNotificationResponse(
 
     if (actionId === ACTION_FOLLOWUP_DONE) {
       const days = Math.max(1, med.followupDays);
-      store.setFollowup(med.id, Date.now() + days * 86_400_000);
+      store.setFollowup(med.id, Date.now() + days * DAY_MS);
       await resync();
       return true;
     }
 
     if (actionId === ACTION_FOLLOWUP_TOMORROW) {
-      store.setFollowup(med.id, Date.now() + 86_400_000);
+      store.setFollowup(med.id, Date.now() + DAY_MS);
       await resync();
       return true;
     }

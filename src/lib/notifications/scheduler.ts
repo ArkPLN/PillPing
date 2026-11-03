@@ -1,27 +1,22 @@
 /**
- * 通知调度器。
+ * 通知调度器（v3 每药计划）。
  *
- * 与原 legacy 实现的差异（已与用户确认）：
- * legacy 用 AlarmManager 只挂 1 个闹钟，触发后由 Receiver 排下一个（链式单闹钟）。
- * RN 没有等价的「闹钟触发后可靠执行 JS」机制，因此改为：
- *   一次性预排所有待服次数（≤12 条一次性 date trigger），
- *   由应用启动/任意状态变更时全量同步（syncAll）。
- * 用户侧行为完全一致（到点都会收到提醒），只是实现模型不同。
+ * 全量同步：先取消本应用排定的一切，再按当前记录重新排定。
+ * - 普通药：未来 48h 内每药每槽位一条一次性通知；interval 只排下一个待服；
+ * - 特殊用药：每种排下一剂；
+ * - 复诊：只排最早的一条。
  */
 
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import {
-  effectiveTime,
-  isStarted,
-  nextPending,
-} from '@/lib/cycle';
 import { formatMonthDay, formatTime } from '@/lib/format';
-import { isCourseActive } from '@/lib/med';
-import { effectiveAt } from '@/lib/specialmed';
-import type { Cycle, Med, SpecialMed } from '@/lib/types';
-import { DOSE_PENDING } from '@/lib/types';
+import { planSummary } from '@/lib/med';
+import { effectiveAt, modeText, recordKeyFor } from '@/lib/specialmed';
+import { slotDose } from '@/lib/plan';
+import { COLORS } from '@/lib/colors';
+import { SCHEDULE_WINDOW_MS } from '@/constants/plan';
+import type { DoseRecord, Med, SpecialMed } from '@/lib/types';
 
 import {
   CATEGORY_DOSE,
@@ -32,37 +27,24 @@ import {
   ensureChannel,
 } from './channel';
 import { NOTIFICATIONS_SUPPORTED, safeNotify } from './platform';
-
-/** identifier 前缀，用于区分并批量取消。 */
-const ID_DOSE = 'dose-';
-const ID_SPECIAL = 'special-';
-const ID_FOLLOWUP = 'followup-';
+import {
+  DOSE_PREFIX,
+  FOLLOWUP_PREFIX,
+  SPECIAL_PREFIX,
+  doseIdentifier,
+  followupIdentifier,
+  selectWindowEntries,
+  specialIdentifier,
+} from './core';
 
 export type SchedulerInput = {
   remindersEnabled: boolean;
-  interval: number;
-  cycle: Cycle | null;
   meds: Med[];
+  records: DoseRecord[];
   specials: SpecialMed[];
-  /** 第 slot 次应服用的药物名摘要。 */
-  summaryForSlot: (slot: number) => string;
-  /** 通知正文（多行）。 */
-  bigTextForSlot: (slot: number) => string;
 };
 
-function doseId(index: number): string {
-  return `${ID_DOSE}${index}`;
-}
-
-function specialId(id: string): string {
-  return `${ID_SPECIAL}${id}`;
-}
-
-function followupId(medId: string): string {
-  return `${ID_FOLLOWUP}${medId}`;
-}
-
-/** 取消所有本应用排定的通知（只取消带我们前缀的，避免误删）。 */
+/** 取消所有本应用排定的通知（只取消带我们前缀的）。 */
 export async function cancelAllScheduled(): Promise<void> {
   if (!NOTIFICATIONS_SUPPORTED) return;
   await safeNotify('cancelAllScheduled', async () => {
@@ -72,7 +54,9 @@ export async function cancelAllScheduled(): Promise<void> {
         .filter((r) => {
           const id = r.identifier ?? '';
           return (
-            id.startsWith(ID_DOSE) || id.startsWith(ID_SPECIAL) || id.startsWith(ID_FOLLOWUP)
+            id.startsWith(DOSE_PREFIX) ||
+            id.startsWith(SPECIAL_PREFIX) ||
+            id.startsWith(FOLLOWUP_PREFIX)
           );
         })
         .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
@@ -80,20 +64,24 @@ export async function cancelAllScheduled(): Promise<void> {
   });
 }
 
-/** 只取消某个普通服药次数的通知。 */
-export async function cancelDose(index: number): Promise<void> {
+/** 只取消某个普通药剂量。 */
+export async function cancelDose(
+  medId: string,
+  slotKey: string,
+  dateKey: string
+): Promise<void> {
   if (!NOTIFICATIONS_SUPPORTED) return;
   try {
-    await Notifications.cancelScheduledNotificationAsync(doseId(index));
+    await Notifications.cancelScheduledNotificationAsync(doseIdentifier(medId, slotKey, dateKey));
   } catch {
     // 不存在时忽略
   }
 }
 
-export async function cancelSpecial(id: string): Promise<void> {
+export async function cancelSpecial(id: string, recordKey: string): Promise<void> {
   if (!NOTIFICATIONS_SUPPORTED) return;
   try {
-    await Notifications.cancelScheduledNotificationAsync(specialId(id));
+    await Notifications.cancelScheduledNotificationAsync(specialIdentifier(id, recordKey));
   } catch {
     // 忽略
   }
@@ -105,13 +93,13 @@ export async function cancelFollowup(): Promise<void> {
     const all = await Notifications.getAllScheduledNotificationsAsync();
     await Promise.all(
       all
-        .filter((r) => (r.identifier ?? '').startsWith(ID_FOLLOWUP))
+        .filter((r) => (r.identifier ?? '').startsWith(FOLLOWUP_PREFIX))
         .map((r) => Notifications.cancelScheduledNotificationAsync(r.identifier))
     );
   });
 }
 
-/** 立即展示一条通知（用于"预览"与"测试"）。 */
+/** 立即展示一条通知（用于预览与测试）。 */
 export async function presentNow(opts: {
   title: string;
   body: string;
@@ -134,13 +122,12 @@ export async function presentNow(opts: {
         priority: Notifications.AndroidNotificationPriority.MAX,
         ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : {}),
       },
-      // null = 立即展示
       trigger: null,
     })
   );
 }
 
-/** 排定一条延时通知（用于 10 秒后台测试）。 */
+/** 排定一条延时通知（用于后台测试）。 */
 export async function scheduleTestIn(seconds: number): Promise<void> {
   if (!NOTIFICATIONS_SUPPORTED) return;
   await ensureChannel();
@@ -176,7 +163,6 @@ async function scheduleAt(
   }
 ): Promise<boolean> {
   if (!NOTIFICATIONS_SUPPORTED) return false;
-  // 只接受未来的时间；已过期的不排（避免立即弹出历史提醒）
   if (when <= Date.now()) return false;
   const ok = await safeNotify('scheduleAt', async () => {
     await Notifications.scheduleNotificationAsync({
@@ -203,12 +189,18 @@ async function scheduleAt(
   return ok === true;
 }
 
+function doseBody(med: Med, entrySlotKey: string): string {
+  const slot = med.plan.type === 'interval'
+    ? undefined
+    : med.plan.slots.find((s) => s.id === entrySlotKey);
+  const dose = slot ? slotDose(med, slot) : { qty: med.doseQty, unit: med.doseUnit };
+  let line = `${dose.qty}${dose.unit}（${med.method}）`;
+  if (med.note) line += ` · ${med.note}`;
+  return line;
+}
+
 /**
- * 全量同步：先取消本应用排定的一切，再按当前状态重新排。
- *
- * 普通服药：为「每一个待服次数」各排一条一次性通知（批量预排）。
- * 特殊用药：每种一条（下次提醒）。
- * 复诊：只排最早的一条（对应 legacy FollowupScheduler 的策略）。
+ * 全量同步：取消所有已排通知，按当前状态重新排。
  */
 export async function syncAll(input: SchedulerInput, now = Date.now()): Promise<void> {
   await ensureCategories();
@@ -216,94 +208,65 @@ export async function syncAll(input: SchedulerInput, now = Date.now()): Promise<
 
   if (!input.remindersEnabled) return;
 
-  // ---- 普通服药 ----
-  const cycle = input.cycle;
-  const hasActive = input.meds.some((m) => m.enabled && isCourseActive(m, now));
-  if (cycle && isStarted(cycle) && hasActive) {
-    for (let i = 0; i < cycle.count; i++) {
-      if (cycle.status[i] !== DOSE_PENDING) continue;
-      const due = effectiveTime(cycle, i);
-      if (due <= now) continue;
+  // ---- 普通药：未来 48h ----
+  const entries = selectWindowEntries(input.meds, input.records, now, SCHEDULE_WINDOW_MS);
+  for (const entry of entries) {
+    const med = input.meds.find((m) => m.id === entry.medId);
+    if (!med) continue;
 
-      const summary = input.summaryForSlot(i) || '还没有配置本次药物，点开应用添加';
-      const dayLabel = formatMonthDay(due);
-      const time = formatTime(due);
-
-      await scheduleAt(doseId(i), due, {
-        title: `该吃药了 · 第${i + 1}次`,
-        body: summary,
+    const dayLabel = formatMonthDay(entry.due);
+    const time = formatTime(entry.due);
+    await scheduleAt(
+      doseIdentifier(entry.medId, entry.slotKey, entry.dateKey),
+      entry.due,
+      {
+        title: '该吃药了',
+        body: doseBody(med, entry.slotKey),
         categoryIdentifier: CATEGORY_DOSE,
-        subtitle: `每天 ${cycle.count} 次 · 间隔 ${input.interval} 小时`,
-        data: { kind: 'dose', index: i, due, when: `${dayLabel} ${time}` },
-      });
-    }
+        subtitle: planSummary(med),
+        data: {
+          kind: 'dose',
+          medId: entry.medId,
+          slotKey: entry.slotKey,
+          dateKey: entry.dateKey,
+          due: entry.due,
+          when: `${dayLabel} ${time}`,
+        },
+      }
+    );
   }
 
-  // ---- 特殊用药 ----
+  // ---- 特殊用药：下一剂 ----
   for (const m of input.specials) {
     if (!m.enabled) continue;
     const due = effectiveAt(m);
     if (due <= 0) continue;
 
-    const scheduleLabel =
-      m.mode === 0 ? `每 ${m.intervalHours} 小时` : `每天 ${pad2(m.hour)}:${pad2(m.minute)}`;
-
-    await scheduleAt(specialId(m.id), due, {
+    await scheduleAt(specialIdentifier(m.id, recordKeyFor(due)), due, {
       title: `特殊用药 · ${m.name}`,
-      body: `${m.dose}（${m.method}）`,
+      body: `${m.doseQty}${m.doseUnit}（${m.method}）`,
       categoryIdentifier: CATEGORY_SPECIAL,
-      subtitle: `独立提醒 · ${scheduleLabel}`,
-      color: '#7C3AED',
-      data: { kind: 'special', id: m.id, due },
+      subtitle: modeText(m),
+      color: COLORS.violet.light,
+      data: { kind: 'special', id: m.id, recordKey: recordKeyFor(due), due },
     });
   }
 
   // ---- 复诊：只排最早一条 ----
   let earliest: Med | null = null;
   for (const m of input.meds) {
-    if (!m.enabled || !isCourseActive(m, now)) continue;
+    if (!m.enabled) continue;
     if (m.followupDays <= 0 || m.nextFollowupAt <= 0) continue;
     if (!earliest || m.nextFollowupAt < earliest.nextFollowupAt) earliest = m;
   }
   if (earliest) {
-    await scheduleAt(followupId(earliest.id), earliest.nextFollowupAt, {
+    await scheduleAt(followupIdentifier(earliest.id), earliest.nextFollowupAt, {
       title: `复诊提醒 · ${earliest.name}`,
       body: '服药期间建议复诊',
       categoryIdentifier: CATEGORY_FOLLOWUP,
       subtitle: '复诊提醒',
-      color: '#B45309',
+      color: COLORS.amber.light,
       data: { kind: 'followup', medId: earliest.id },
     });
   }
-}
-
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-
-/**
- * 仅重排普通服药的「下一个」待服次数。
- * 用于推迟 10 分钟这类只需单点更新的场景。
- */
-export async function syncNextDoseOnly(input: SchedulerInput, now = Date.now()): Promise<void> {
-  const cycle = input.cycle;
-  if (!cycle || !isStarted(cycle)) return;
-
-  const next = nextPending(cycle);
-  if (next < 0) return;
-
-  await cancelDose(next);
-  if (!input.remindersEnabled) return;
-
-  const due = effectiveTime(cycle, next);
-  if (due <= now) return;
-
-  const summary = input.summaryForSlot(next) || '还没有配置本次药物，点开应用添加';
-  await scheduleAt(doseId(next), due, {
-    title: `该吃药了 · 第${next + 1}次`,
-    body: summary,
-    categoryIdentifier: CATEGORY_DOSE,
-    subtitle: `每天 ${cycle.count} 次 · 间隔 ${input.interval} 小时`,
-    data: { kind: 'dose', index: next, due },
-  });
 }
