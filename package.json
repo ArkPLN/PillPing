@@ -53,6 +53,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/lib/__tests__/*.test.ts\"",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "shots:android": "uv run --project tools/android python tools/android/capture.py"
   }
 }

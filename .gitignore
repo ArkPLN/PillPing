@@ -58,3 +58,9 @@ legacy/medbuild/
 /.claude
 /.opencode
 /.zcode
+
+# Android screenshot harness (Python)
+tools/android/.venv/
+__pycache__/
+*.py[cod]
+artifacts/
