@@ -1,5 +1,25 @@
 # 按时吃药（PillPing)
 
+<p align="center">
+  <img src="./assets/images/Banner.jpg" alt="PillPing 按时吃药" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Expo_SDK-57-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo SDK 57" />
+  <img src="https://img.shields.io/badge/React_Native-0.86-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React Native 0.86" />
+  <img src="https://img.shields.io/badge/TypeScript-6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 6" />
+  <img src="https://img.shields.io/badge/NativeWind-4.2-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="NativeWind 4.2" />
+  <br />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-3.4-0EA5E9?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS 3.4" />
+  <img src="https://img.shields.io/badge/Zustand-5-2B2B2B?style=for-the-badge" alt="Zustand 5" />
+  <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
+  <img src="https://img.shields.io/badge/Yarn-4-2C8EBB?style=for-the-badge&logo=yarn&logoColor=white" alt="Yarn 4" />
+</p>
+
+<p align="center">
+  <a href="./README.md">简体中文</a> · <a href="./README_en.md">English</a>
+</p>
+
 一个简单，易用的服药提醒应用，基于 Expo React Native 构建。
 
 ## 技术栈
