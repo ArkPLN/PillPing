@@ -60,6 +60,51 @@ yarn test
 yarn web
 ```
 
+## 发布（GitHub Release）
+
+发布由 `.github/workflows/release.yml` 驱动：推送 `v*.*.*` 标签，或手动运行 workflow，即调用托管 EAS Build 产出两个 64 位 APK，并自动创建/更新 GitHub Release。
+
+### 首次配置（只需一次）
+
+1. 登录并关联 EAS 项目：
+
+   ```bash
+   npx eas-cli@latest login
+   npx eas-cli@latest init
+   ```
+
+   `eas init` 会向 `app.json` 写入 `expo.extra.eas.projectId`，提交该改动。
+
+2. 创建托管 Android keystore：
+
+   ```bash
+   npx eas-cli@latest credentials -p android
+   ```
+
+3. 在 expo.dev → Account settings → Access tokens 生成 token，保存为 GitHub 仓库 Secret `EXPO_TOKEN`。
+
+### 发版步骤
+
+1. 更新 `app.json` 的 `expo.version` 与 `expo.android.versionCode`（`versionCode` 必须单调递增）。
+2. 提交并推送。
+3. 打标签并推送：
+
+   ```bash
+   git tag v2.1.0
+   git push origin v2.1.0
+   ```
+
+   标签必须等于 `v<app.json 的 version>`，否则 `verify` job 会失败。
+
+4. 在 Actions 页面查看 `Release APK`；完成后 Release 页面会出现：
+   - `PillPing-2.1.0-arm64-v8a.apk`（绝大多数真机）
+   - `PillPing-2.1.0-x86_64.apk`（模拟器 / x86_64 设备）
+   - 对应的 `.sha256` 校验文件
+
+手动重跑：Actions → Release APK → Run workflow，输入已存在的 tag。
+
+> 每次发版消耗 2 次 EAS Android 构建（免费计划 15 次/月、1 并发）。构建配置见 `eas.json` 的 `apk-arm64` 与 `apk-x86_64`，不要直接用其他 profile。
+
 ## 功能
 
 ### 今日页

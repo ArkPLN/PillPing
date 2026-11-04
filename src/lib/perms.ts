@@ -5,6 +5,7 @@
  * 只能跳转无法回读的：电池优化白名单、厂商自启动。
  */
 
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Linking, Platform } from 'react-native';
@@ -13,7 +14,7 @@ import { COLORS } from '@/lib/colors';
 import { CHANNEL_ID, ensureChannel } from './notifications/channel';
 import { NOTIFICATIONS_SUPPORTED } from './notifications/platform';
 
-const PKG = 'com.expo.medtimer';
+const PKG = Constants.expoConfig?.android?.package ?? 'com.expo.arkpln.pillping';
 
 /** 对应 legacy Perms.notificationsEnabled。 */
 export async function notificationsEnabled(): Promise<boolean> {

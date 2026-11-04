@@ -5,10 +5,10 @@
     "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "medtimer",
+    "scheme": "pillping",
     "userInterfaceStyle": "automatic",
     "android": {
-      "package": "com.expo.medtimer",
+      "package": "com.expo.arkpln.pillping",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#0B5D56",
@@ -57,6 +57,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8b504bf8-c288-4170-950a-546919202ea9"
+      }
+    },
+    "owner": "arkplains-team"
   }
 }

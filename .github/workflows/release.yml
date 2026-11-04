@@ -1,0 +1,202 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的发布 tag（例如 v2.1.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Check tag matches app version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./app.json').expo.version")
+          if [ "v$VERSION" != "$RELEASE_TAG" ]; then
+            echo "::error::tag $RELEASE_TAG does not match app.json version v$VERSION"
+            exit 1
+          fi
+
+      - name: Check EAS project id
+        run: |
+          set -euo pipefail
+          node -e "const p=require('./app.json'); if (!p.expo?.extra?.eas?.projectId) { console.error('::error::app.json is missing expo.extra.eas.projectId; run: npx eas-cli@latest init'); process.exit(1); }"
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Test
+        run: yarn test
+
+  build:
+    name: Build ${{ matrix.abi }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            profile: apk-arm64
+          - abi: x86_64
+            profile: apk-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          packager: npm
+          eas-cache: "true"
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build with EAS
+        id: eas-build
+        run: |
+          set -euo pipefail
+          eas build \
+            --platform android \
+            --profile "${{ matrix.profile }}" \
+            --non-interactive \
+            --wait \
+            --json > build.json
+
+          BUILD_ID=$(jq -r 'if type=="array" then .[0].id else .id end' build.json)
+          ARTIFACT_URL=$(jq -r 'if type=="array" then .[0].artifacts.buildUrl else .artifacts.buildUrl end' build.json)
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "artifact_url=$ARTIFACT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK
+        id: download
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./app.json').expo.version")
+          APK="PillPing-${VERSION}-${{ matrix.abi }}.apk"
+          BUILD_ID="${{ steps.eas-build.outputs.build_id }}"
+          ARTIFACT_URL="${{ steps.eas-build.outputs.artifact_url }}"
+
+          if [ -n "$ARTIFACT_URL" ] && [ "$ARTIFACT_URL" != "null" ] \
+            && curl -fL --retry 3 --retry-delay 5 -o "$APK" "$ARTIFACT_URL"; then
+            echo "downloaded from artifact URL"
+          else
+            rm -f "$APK"
+            eas build:download --build-id "$BUILD_ID" --platform android --non-interactive
+            downloaded=$(find . -maxdepth 1 -name '*.apk' | head -n 1)
+            if [ -z "$downloaded" ]; then
+              echo "::error::eas build:download did not produce an APK"
+              exit 1
+            fi
+            mv "$downloaded" "$APK"
+          fi
+
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Verify APK ABI
+        run: |
+          set -euo pipefail
+          APK="${{ steps.download.outputs.apk }}"
+          ABIS=$(unzip -Z1 "$APK" | awk -F/ '/^lib\// {print $2}' | sort -u | paste -sd, -)
+          echo "ABIs in $APK: ${ABIS:-<none>}"
+          if [ "$ABIS" != "${{ matrix.abi }}" ]; then
+            echo "::error::expected only ${{ matrix.abi }}, got: ${ABIS:-<none>}"
+            exit 1
+          fi
+
+      - name: Generate checksum
+        run: |
+          set -euo pipefail
+          APK="${{ steps.download.outputs.apk }}"
+          sha256sum "$APK" > "$APK.sha256"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.abi }}
+          path: |
+            *.apk
+            *.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -lh dist
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: PillPing ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*.sha256
