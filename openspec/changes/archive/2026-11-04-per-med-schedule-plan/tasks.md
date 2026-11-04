@@ -20,7 +20,7 @@
 
 - [x] 3.1 重写 `src/lib/notifications/input.ts`：`SchedulerInput` 输入源改为 `meds + records + specials`，identifier 派生函数 `doseId(medId, slotKey, dateKey)` / `specialRecordId(id, key)` 单一来源；单测验证同一剂量排定与取消 identifier 配对
 - [x] 3.2 重写 `src/lib/notifications/scheduler.ts` `syncAll`：每药每槽位排定，滚动预排 48h 窗口，interval 型只排下一个待服剂量；`syncNextDoseOnly` 改为 med+slot 粒度；单测覆盖 48h 窗口截断、interval 锚点缺失时只排零条
-- [ ] 3.3 更新 `src/lib/notifications/response.ts`：action 按钮回传 `medId + slotKey + dateKey`（特殊用药为 record key），`code` 编码扩展不越 0–127；用 10 秒后台测试通道手动验证按钮回传后记录成功
+- [x] 3.3 更新 `src/lib/notifications/response.ts`：action 按钮回传 `medId + slotKey + dateKey`（特殊用药为 record key），`code` 编码扩展不越 0–127；用 10 秒后台测试通道手动验证按钮回传后记录成功
 
 ## 4. 页面层改造
 
@@ -38,4 +38,4 @@
 - [x] 5.1 迁移 `src/lib/__tests__/cycle.test.ts` 到 interval 型新函数（三个 legacy 案例继续钉住），删除全局周期相关断言；`yarn test` 全绿
 - [x] 5.2 新增 `plan.test.ts` / `timeline.test.ts` / `plan-template.test.ts`（若 1.2/1.3/1.5 已建则合并此步为补漏），漏服派生与跳过区分有断言；`yarn test` 全绿
 - [x] 5.3 更新 `README.md`（v3 功能描述与 legacy 差异表、数据不迁移说明）与 `AGENTS.md`（删除「字段名与 legacy JSON 对齐」不变量，「链式排程」改为每药 interval 语义表述）
-- [ ] 5.4 全量验收：`yarn typecheck` + `yarn test` 通过，`npx expo-doctor` 无新增问题；Android 开发构建跑通「添加两药不同计划 → 首页时间线 → 记录/跳过/漏服 → 通知按槽位触发」与「特殊用药三种形态各一条 → 独立提醒」完整路径
+- [x] 5.4 全量验收：`yarn typecheck` + `yarn test` 通过，`npx expo-doctor` 无新增问题；Android 开发构建跑通「添加两药不同计划 → 首页时间线 → 记录/跳过/漏服 → 通知按槽位触发」与「特殊用药三种形态各一条 → 独立提醒」完整路径
