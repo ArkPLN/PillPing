@@ -198,7 +198,7 @@ export default function SettingsScreen() {
     Alert.alert('已完成', '全部数据已清空');
   }, [store]);
 
-  const version = Constants.expoConfig?.version ?? '3.1.0';
+  const version = Constants.expoConfig?.version ?? '2.1.0';
   const activeCount = meds.filter((m) => m.enabled && isCourseActive(m, now)).length;
   const todayAgg = aggregateDay(meds, records, todayKey(), now);
   const pendingCount = Math.max(0, todayAgg.total - todayAgg.taken);
