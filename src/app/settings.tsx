@@ -198,7 +198,7 @@ export default function SettingsScreen() {
     Alert.alert('已完成', '全部数据已清空');
   }, [store]);
 
-  const version = Constants.expoConfig?.version ?? '2.0.0';
+  const version = Constants.expoConfig?.version ?? '3.1.0';
   const activeCount = meds.filter((m) => m.enabled && isCourseActive(m, now)).length;
   const todayAgg = aggregateDay(meds, records, todayKey(), now);
   const pendingCount = Math.max(0, todayAgg.total - todayAgg.taken);
@@ -387,29 +387,16 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* 应用安全（说明性） */}
-        <Section>应用安全</Section>
-        <Row
-          title="签名校验"
-          subtitle="APK 完整性由 Android 的 v2/v3 签名机制在安装与更新时校验"
-          action={<Icon name="chevron" size={16} color={color('mutedLight')} />}
-          onPress={() =>
-            Alert.alert(
-              '应用安全',
-              'APK 安装时由 Android 校验 v2/v3 签名；只有使用同一证书签名的更新才能覆盖安装并保留数据。\n\n注意：没有绝对安全，请只从可信来源安装。'
-            )
-          }
-        />
-
         {/* 关于 */}
         <View className="mt-6 border-t border-line pt-4 dark:border-line-d">
           <Medium className="text-[12.5px] text-muted dark:text-muted-d">
             按时吃药  v{version}
           </Medium>
-          <TextMuted className="mt-1 text-[11.5px]">作者：肚小圆</TextMuted>
-          <TextMuted className="mt-0.5 text-[11px]">本应用使用 AI 生成（界面、代码与文案）。</TextMuted>
+          <TextMuted className="mt-1 text-[11.5px]">Demo作者：肚小圆</TextMuted>
+          <TextMuted className="mt-1 text-[11.5px]">应用改造与开发：arkpln</TextMuted>
+          <TextMuted className="mt-0.5 text-[11px]">Built With React Native</TextMuted>
           <TextMuted className="mt-1.5 text-[11.5px] leading-[16px]">
-            本应用仅用于服药时间提醒，不提供诊断或用药建议。具体药物、剂量和服用方式请遵医嘱。
+            本应用仅用于服药时间提醒，不提供任何实际诊断或用药建议。具体药物、剂量和服用方式请遵医嘱。
           </TextMuted>
         </View>
 
