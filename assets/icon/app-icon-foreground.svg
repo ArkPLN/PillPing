@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#2DD4BF" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#0F766E" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 自适应图标前景：透明背景，复用 legacy ic_launcher_fg 的几何 -->
+  <circle cx="54" cy="54" r="31" fill="none" stroke="url(#ring)" stroke-width="1.5"/>
+  <g transform="rotate(-38 54 54)">
+    <path d="M45 45H63C67.97 45 72 49.03 72 54C72 58.97 67.97 63 63 63H45C40.03 63 36 58.97 36 54C36 49.03 40.03 45 45 45Z" fill="#FFFFFF"/>
+    <path d="M54 45V63" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+  <circle cx="74" cy="34" r="13.5" fill="#0F766E"/>
+  <circle cx="74" cy="34" r="11" fill="#FFFFFF"/>
+  <path d="M74 28V35H79.4" fill="none" stroke="#0F766E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

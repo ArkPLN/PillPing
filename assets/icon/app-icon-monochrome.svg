@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <defs>
+    <!-- 用光圈把胶囊与时钟分开 -->
+    <mask id="capsuleCut">
+      <rect width="108" height="108" fill="#FFFFFF"/>
+      <circle cx="74" cy="34" r="13.5" fill="#000000"/>
+    </mask>
+    <!-- 指针在表盘上挖空 -->
+    <mask id="clockCut">
+      <rect width="108" height="108" fill="#FFFFFF"/>
+      <path d="M74 28V34.5H79" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+
+  <g mask="url(#capsuleCut)">
+    <g transform="rotate(-38 54 54)">
+      <path d="M45 45H63C67.97 45 72 49.03 72 54C72 58.97 67.97 63 63 63H45C40.03 63 36 58.97 36 54C36 49.03 40.03 45 45 45Z" fill="#FFFFFF"/>
+    </g>
+  </g>
+  <circle cx="74" cy="34" r="10.5" fill="#FFFFFF" mask="url(#clockCut)"/>
+</svg>

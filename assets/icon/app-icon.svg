@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B5D56"/>
+      <stop offset="1" stop-color="#0D9488"/>
+    </linearGradient>
+    <!-- 装饰圆环：从左上的浅青渐变到右下的近乎透明，增加层次但不抢主体 -->
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#2DD4BF" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#0F766E" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：legacy/res/drawable/ic_launcher_bg.xml 的 315° 线性渐变 -->
+  <rect width="108" height="108" fill="url(#bg)"/>
+  <circle cx="54" cy="54" r="31" fill="none" stroke="url(#ring)" stroke-width="1.5"/>
+
+  <!-- 胶囊：legacy/res/drawable/ic_launcher_fg.xml，绕 (54,54) 旋转 -38° -->
+  <g transform="rotate(-38 54 54)">
+    <path d="M45 45H63C67.97 45 72 49.03 72 54C72 58.97 67.97 63 63 63H45C40.03 63 36 58.97 36 54C36 49.03 40.03 45 45 45Z" fill="#FFFFFF"/>
+    <path d="M54 45V63" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+
+  <!-- 时钟：青色光圈 + 白色表盘 + 指针 -->
+  <circle cx="74" cy="34" r="13.5" fill="#0F766E"/>
+  <circle cx="74" cy="34" r="11" fill="#FFFFFF"/>
+  <path d="M74 28V35H79.4" fill="none" stroke="#0F766E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
