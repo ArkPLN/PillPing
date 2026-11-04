@@ -54,6 +54,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/lib/__tests__/*.test.ts\"",
     "lint": "expo lint",
-    "shots:android": "uv run --project tools/android python tools/android/capture.py"
+    "shots:android": "uv run --project tools/android python tools/android/capture.py",
+    "eas-build-pre-install": "corepack enable"
   }
 }
